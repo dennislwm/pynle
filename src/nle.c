@@ -512,6 +512,18 @@ nle_end(nle_ctx_t *nle)
     free(nle);
 }
 
+/* Writes a native NetHack save file for the current episode without
+ * stopping it. Returns dosave0()'s own result: 1 if the save file was
+ * written, 0 if there was nothing worth saving. Safe to call between
+ * nle_step() calls: dosave0() only reads/writes global state (u, iflags,
+ * SAVEF, ...), none of it local to the suspended fiber's own call stack. */
+int
+nle_save(nle_ctx_t *nle)
+{
+    current_nle_ctx = nle;
+    return dosave0();
+}
+
 /* From unixtty.c */
 /* fatal error */
 /*VARARGS1*/

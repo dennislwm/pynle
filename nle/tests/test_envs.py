@@ -502,6 +502,53 @@ class TestEnvMisc:
             env.step(0)
 
 
+class TestSaveResume:
+    """REQ-001: native save/resume via a caller-supplied vardir."""
+
+    def test_save_then_resume_matches_state(self):
+        vardir = tempfile.mkdtemp(prefix="nle_save_resume_")
+        env = gym.make("NetHackScore-v0", vardir=vardir)
+        env.reset()
+        obs, _reward, _done, _truncated, _info = env.step(1)
+        pos_before = tuple(obs["blstats"][:2])
+        env.unwrapped.save()
+        env.close()
+
+        # A separate NLE instance, same vardir, simulates a fresh process
+        # resuming after the first one crashed or was killed.
+        resumed = gym.make("NetHackScore-v0", vardir=vardir)
+        obs, _info = resumed.reset()
+        pos_after = tuple(obs["blstats"][:2])
+        resumed.close()
+
+        assert pos_after == pos_before
+
+    def test_save_twice_raises(self):
+        """dosave0()'s own save flag is single-shot (save.c:274) -- a
+        second save() in the same episode must raise, not corrupt the
+        save file or crash."""
+        vardir = tempfile.mkdtemp(prefix="nle_save_twice_")
+        env = gym.make("NetHackScore-v0", vardir=vardir)
+        env.reset()
+        env.step(1)
+        env.unwrapped.save()
+
+        env.step(1)
+        with pytest.raises(RuntimeError, match="nothing worth saving"):
+            env.unwrapped.save()
+        env.close()
+
+    def test_save_without_vardir_still_works_but_is_unrecoverable(self):
+        """No vardir means the default ephemeral, auto-deleted tempdir --
+        save() itself still succeeds (nothing here should crash), it's
+        simply pointless: nothing else will ever know where it went."""
+        env = gym.make("NetHackScore-v0")
+        env.reset()
+        env.step(1)
+        env.unwrapped.save()  # must not raise
+        env.close()
+
+
 class TestNetHackChallenge:
     def test_no_seed_setting(self):
         env = gym.make("NetHackChallenge-v0")

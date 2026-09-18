@@ -156,10 +156,34 @@ True
 >>> d.stop()  # blocks until the daemon has exited
 ```
 
-It does not survive the daemon process itself dying (crash, OOM-kill, host
-reboot) -- a caller reconnecting later against a still-alive daemon is the
-failure mode this covers. See the pynle wiki's
+By itself, this does not survive the daemon process dying (crash, OOM-kill,
+host reboot) -- a caller reconnecting later against a still-alive daemon is
+the failure mode this covers on its own. See the pynle wiki's
 `decisions/adr-01-live-episode-turn-driver.md` for the full record.
+
+### Surviving a killed or restarted daemon
+
+`stop(save=True)` writes a native NetHack save file before shutting down,
+mirroring NetHack's own save-and-quit -- and because the daemon reuses its
+own identity directory as NetHack's working directory, a fresh `NLEDaemon`
+started on that same directory resumes automatically:
+
+```python
+>>> from nle.scripts.nle_daemon import NLEDaemon
+>>> d = NLEDaemon("/tmp/nle-daemon").start()
+>>> d.reset()
+>>> d.step(0)
+>>> d.stop(save=True)  # saves, then shuts down -- always stops either way
+>>> # ... daemon process is gone; later, in a new process: ...
+>>> d = NLEDaemon("/tmp/nle-daemon").start()
+>>> d.reset()  # resumes the saved episode, not a fresh game
+```
+
+Saving only ever succeeds once per episode -- NetHack's own save flag is
+zeroed after a successful save and never re-armed during normal play, so
+`save()` is wired into shutdown rather than offered as a repeatable
+mid-episode action. A plain `stop()` (no `save=True`) leaves nothing behind
+to resume.
 
 Additionally, a [TorchBeast](https://github.com/facebookresearch/torchbeast)
 agent is bundled in `nle.agent` together with a simple model to provide a

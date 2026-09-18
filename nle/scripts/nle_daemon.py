@@ -121,6 +121,14 @@ class NLEDaemon:
         from this caller's session, and waits for it to report ready."""
         if self.is_alive():
             raise RuntimeError(f"daemon already running (pipe_dir={self.pipe_dir})")
+        # is_alive() already confirmed the process behind any existing
+        # pid_file is dead (e.g. a SIGKILL/OOM-kill that skipped _run()'s
+        # own cleanup) -- clear it now, or the readiness wait below would
+        # see the stale file and return immediately, before the new
+        # subprocess has actually started.
+        pid_file = _pid_file_path(self.pipe_dir)
+        if os.path.exists(pid_file):
+            os.remove(pid_file)
         os.makedirs(self.pipe_dir, exist_ok=True)
         subprocess.Popen(
             [
@@ -137,7 +145,6 @@ class NLEDaemon:
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
-        pid_file = _pid_file_path(self.pipe_dir)
         deadline = time.time() + timeout
         while not os.path.exists(pid_file):
             if time.time() > deadline:
@@ -145,18 +152,39 @@ class NLEDaemon:
             time.sleep(0.05)
         return self
 
-    def stop(self, timeout=30):
+    def stop(self, save=False, timeout=30):
         """Asks a live daemon to shut down and waits for it to exit.
-        No-op if it isn't running."""
+        No-op if it isn't running.
+
+        save=True mirrors NetHack's own save-and-quit: dosave0()
+        (see REQ-001) only ever succeeds once per episode -- normal play
+        never re-arms it -- so this is the daemon's one designated
+        moment to use it. Resuming later means starting a new NLEDaemon
+        on this same pipe_dir; NetHack's own startup finds the save file
+        left in it and resumes automatically, no separate call needed.
+        The daemon always stops either way; a failed save is
+        raised here, after shutdown, as information rather than
+        something that blocks the stop.
+        """
         if not self.is_alive():
             return
-        _write_framed(_action_fifo_path(self.pipe_dir), {"cmd": "stop"})
+        msg = {"cmd": "stop"}
+        if save:
+            msg["save"] = True
+        _write_framed(_action_fifo_path(self.pipe_dir), msg)
+        save_error = None
+        if save:
+            response = _read_framed(_obs_fifo_path(self.pipe_dir), timeout=timeout)
+            if response is not None and not response.get("ok", True):
+                save_error = response["error"]
         pid_file = _pid_file_path(self.pipe_dir)
         deadline = time.time() + timeout
         while os.path.exists(pid_file):
             if time.time() > deadline:
                 raise TimeoutError(f"daemon failed to stop within {timeout}s")
             time.sleep(0.05)
+        if save_error:
+            raise RuntimeError(f"save failed during stop: {save_error}")
 
     def step(self, action, **kwargs):
         return self._update(self._send("step", action=action, **kwargs))
@@ -206,8 +234,13 @@ def _run(pipe_dir, character, max_episode_steps):
         actions=nethack.ACTIONS,
         allow_all_modes=True,
         observation_keys=DEFAULT_OBSERVATION_KEYS,
+        vardir=pipe_dir,
     )
-    env.reset()
+    # No reset() here: the caller's own first "reset" message is what
+    # resumes a leftover save file (or starts fresh if there is none) --
+    # matches every existing NLEDaemon usage, which already calls
+    # reset() first. Resetting here too would silently discard whatever
+    # this reset() just resumed, with no way for the caller to see it.
 
     pid_file = _pid_file_path(pipe_dir)
     with open(pid_file, "w") as f:
@@ -220,6 +253,13 @@ def _run(pipe_dir, character, max_episode_steps):
                 continue
             cmd = msg.get("cmd")
             if cmd == "stop":
+                if msg.get("save"):
+                    try:
+                        env.save()
+                        response = {"ok": True}
+                    except Exception as exc:
+                        response = {"ok": False, "error": str(exc)}
+                    _write_framed(obs_fifo, response)
                 break
             try:
                 if cmd == "reset":

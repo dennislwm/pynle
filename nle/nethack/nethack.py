@@ -170,6 +170,7 @@ class Nethack:
         copy=False,
         wizard=False,
         hackdir=HACKDIR,
+        vardir=None,
         spawn_monsters=True,
         scoreprefix="",
         fix_moon_phase=False,
@@ -183,14 +184,24 @@ class Nethack:
                 "Couldn't find NetHack installation at '%s'." % hackdir
             )
 
-        # Create a HACKDIR for us.
-        self._tempdir = tempfile.TemporaryDirectory(prefix="nle")
-        self._vardir = self._tempdir.name
+        if vardir is None:
+            # Create an ephemeral HACKDIR for us, deleted on close().
+            self._tempdir = tempfile.TemporaryDirectory(prefix="nle")
+            self._vardir = self._tempdir.name
+        else:
+            # Caller-owned, persistent HACKDIR -- not deleted on close(),
+            # so a save() written here can be resumed by a later
+            # Nethack instance pointed at the same vardir.
+            self._tempdir = None
+            self._vardir = vardir
+            os.makedirs(self._vardir, exist_ok=True)
 
-        # Symlink a nhdat.
-        os.symlink(os.path.join(hackdir, "nhdat"), os.path.join(self._vardir, "nhdat"))
+        # Symlink a nhdat, unless one is already there from a prior run.
+        if not os.path.exists(os.path.join(self._vardir, "nhdat")):
+            os.symlink(os.path.join(hackdir, "nhdat"), os.path.join(self._vardir, "nhdat"))
 
-        # Touch files, so lock_file() in files.c passes.
+        # Touch files, so lock_file() in files.c passes. Safe to repeat:
+        # O_CREAT without O_TRUNC leaves an existing file's contents alone.
         for fn in ["perm", "record", "logfile"]:
             os.close(os.open(os.path.join(self._vardir, fn), os.O_CREAT))
         if scoreprefix:
@@ -198,7 +209,9 @@ class Nethack:
         else:
             os.close(os.open(os.path.join(self._vardir, "xlogfile"), os.O_CREAT))
 
-        os.mkdir(os.path.join(self._vardir, "save"))
+        # exist_ok: a persistent vardir may already have a save/ directory,
+        # possibly holding a save from a prior instance to resume.
+        os.makedirs(os.path.join(self._vardir, "save"), exist_ok=True)
 
         # An assortment of hacks:
         #   Copy our .so into self._vardir to load several copies of the dl.
@@ -289,6 +302,14 @@ class Nethack:
         self._pynethack = None
         self._dl = None
         self._tempdir = None
+
+    def save(self):
+        """Writes a native NetHack save file for the current episode
+        without stopping it. A later Nethack instance constructed with
+        the same vardir resumes it automatically -- NetHack's own
+        startup (unixmain.c) checks for and loads a matching save file
+        before character creation, no separate "resume" call needed."""
+        self._pynethack.save()
 
     def set_initial_seeds(self, core, disp, reseed=False, lgen=None):
         self._pynethack.set_initial_seeds(core, disp, reseed, lgen)

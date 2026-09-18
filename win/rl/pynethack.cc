@@ -281,6 +281,18 @@ class Nethack
     }
 
     void
+    save()
+    {
+        if (!nle_)
+            throw std::runtime_error("save called without reset()");
+        if (obs_.done)
+            throw std::runtime_error("Called save on finished NetHack");
+        if (!nle_save(nle_))
+            throw std::runtime_error(
+                "dosave0() reported nothing worth saving");
+    }
+
+    void
     set_initial_seeds(unsigned long core, unsigned long disp, bool reseed,
                       py::object pyLgen)
     {
@@ -569,6 +581,7 @@ PYBIND11_MODULE(_pynethack, m)
              py::arg("tty_colors") = py::none(),
              py::arg("tty_cursor") = py::none(), py::arg("misc") = py::none())
         .def("close", &Nethack::close)
+        .def("save", &Nethack::save)
         .def("set_initial_seeds", &Nethack::set_initial_seeds)
         .def("set_seeds", &Nethack::set_seeds)
         .def("get_seeds", &Nethack::get_seeds)

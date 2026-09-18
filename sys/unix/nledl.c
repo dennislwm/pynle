@@ -111,6 +111,22 @@ nle_end(nledl_ctx *nledl)
     free(nledl);
 }
 
+int
+nle_save(nledl_ctx *nledl)
+{
+    int (*save)(void *);
+
+    save = dlsym(nledl->dlhandle, "nle_save");
+
+    char *error = dlerror();
+    if (error != NULL) {
+        fprintf(stderr, "%s\n", error);
+        exit(EXIT_FAILURE);
+    }
+
+    return save(nledl->nle_ctx);
+}
+
 void
 nle_set_seed(nledl_ctx *nledl, unsigned long core, unsigned long disp,
              char reseed, unsigned long lgen)

@@ -199,6 +199,7 @@ class NLE(gym.Env):
         spawn_monsters=True,
         render_mode="human",
         fix_moon_phase=False,
+        vardir=None,
     ):
         """Constructs a new NLE environment.
 
@@ -237,6 +238,11 @@ class NLE(gym.Env):
                 deterministic time-based game effects (moon phase, friday 13th,
                 night, midnight) from the seed instead of real system time.
                 If False or no seeds are set, use real system time (default).
+            vardir (str or None): path to NetHack's working directory (holds
+                its native save file, lock files, etc). If None (default),
+                NLE creates a fresh one, deleted on close(). Pass a stable
+                path to make save()/resume survive across separate
+                NLE instances -- see save()'s docstring.
         """
         self.character = character
         self._max_episode_steps = max_episode_steps
@@ -323,6 +329,7 @@ class NLE(gym.Env):
             spawn_monsters=spawn_monsters,
             scoreprefix=scoreprefix,
             fix_moon_phase=fix_moon_phase,
+            vardir=vardir,
         )
         self._close_nethack = weakref.finalize(self, self.nethack.close)
 
@@ -476,6 +483,23 @@ class NLE(gym.Env):
     def close(self):
         self._close_nethack()
         super().close()
+
+    def save(self):
+        """Writes a native NetHack save file for the current episode,
+        without stopping it. Requires this NLE to have been constructed
+        with a `vardir` -- the default (an ephemeral, auto-deleted
+        vardir) makes a save unrecoverable, since nothing else
+        will know where it went.
+
+        A later NLE constructed with the same `vardir` and the same
+        `character` resumes this episode automatically on its first
+        reset() -- NetHack's own startup already checks for and loads a
+        matching save file before character creation; there is no
+        separate resume() call. Does not survive this process's own
+        crash or kill before save() is called -- only covers a
+        clean handoff to a later, separate NLE instance.
+        """
+        self.nethack.save()
 
     def seed(self, core=None, disp=None, reseed=False, lgen=None):
         """Sets the state of the NetHack RNGs after the next reset.
