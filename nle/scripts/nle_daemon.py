@@ -89,81 +89,108 @@ def _write_framed(fifo_path, obj):
         os.close(fd)
 
 
-def is_alive(pipe_dir):
-    """Stdlib equivalent of `tmux has-session`: PID-file liveness check."""
-    pid_file = _pid_file_path(pipe_dir)
-    if not os.path.exists(pid_file):
-        return False
-    try:
-        pid = int(open(pid_file).read().strip())
-        os.kill(pid, 0)
-    except (OSError, ValueError):
-        return False
-    return True
+class NLEDaemon:
+    """The only interface for driving a daemon (see Conventions.md,
+    "Interact with a live daemon through NLEDaemon exclusively"). The wire
+    protocol (PID-file liveness, FIFO framing, spawn/shutdown) lives
+    directly in these methods -- there is no module-level function to
+    reach this logic through instead.
+    `pipe_dir` remains the daemon's real identity; this object caches the
+    latest response as attributes and holds no other state. Multiple
+    instances against the same `pipe_dir` are independent client handles
+    to the same daemon -- they don't share their cached attributes."""
 
+    def __init__(self, pipe_dir):
+        self.pipe_dir = pipe_dir
+        self.obs = self.reward = self.done = self.truncated = self.info = None
 
-def start(pipe_dir, character="mon-hum-neu-mal", max_episode_steps=5000, timeout=60):
-    """Starts the daemon as a standalone background process, detached from
-    this caller's session, and waits for it to report ready."""
-    if is_alive(pipe_dir):
-        raise RuntimeError(f"daemon already running (pipe_dir={pipe_dir})")
-    os.makedirs(pipe_dir, exist_ok=True)
-    subprocess.Popen(
-        [
-            sys.executable,
-            "-m",
-            "nle.scripts.nle_daemon",
-            "_run",
-            pipe_dir,
-            character,
-            str(max_episode_steps),
-        ],
-        start_new_session=True,
-        stdin=subprocess.DEVNULL,
-        stdout=subprocess.DEVNULL,
-        stderr=subprocess.DEVNULL,
-    )
-    pid_file = _pid_file_path(pipe_dir)
-    deadline = time.time() + timeout
-    while not os.path.exists(pid_file):
-        if time.time() > deadline:
-            raise TimeoutError(f"daemon failed to start within {timeout}s")
-        time.sleep(0.05)
+    def is_alive(self):
+        """Stdlib equivalent of `tmux has-session`: PID-file liveness check."""
+        pid_file = _pid_file_path(self.pipe_dir)
+        if not os.path.exists(pid_file):
+            return False
+        try:
+            pid = int(open(pid_file).read().strip())
+            os.kill(pid, 0)
+        except (OSError, ValueError):
+            return False
+        return True
 
+    def start(self, character="mon-hum-neu-mal", max_episode_steps=5000, timeout=60):
+        """Starts the daemon as a standalone background process, detached
+        from this caller's session, and waits for it to report ready."""
+        if self.is_alive():
+            raise RuntimeError(f"daemon already running (pipe_dir={self.pipe_dir})")
+        os.makedirs(self.pipe_dir, exist_ok=True)
+        subprocess.Popen(
+            [
+                sys.executable,
+                "-m",
+                "nle.scripts.nle_daemon",
+                "_run",
+                self.pipe_dir,
+                character,
+                str(max_episode_steps),
+            ],
+            start_new_session=True,
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        pid_file = _pid_file_path(self.pipe_dir)
+        deadline = time.time() + timeout
+        while not os.path.exists(pid_file):
+            if time.time() > deadline:
+                raise TimeoutError(f"daemon failed to start within {timeout}s")
+            time.sleep(0.05)
+        return self
 
-def stop(pipe_dir, timeout=30):
-    """Asks a live daemon to shut down and waits for it to exit.
-    No-op if it isn't running."""
-    if not is_alive(pipe_dir):
-        return
-    _write_framed(_action_fifo_path(pipe_dir), {"cmd": "stop"})
-    pid_file = _pid_file_path(pipe_dir)
-    deadline = time.time() + timeout
-    while os.path.exists(pid_file):
-        if time.time() > deadline:
-            raise TimeoutError(f"daemon failed to stop within {timeout}s")
-        time.sleep(0.05)
+    def stop(self, timeout=30):
+        """Asks a live daemon to shut down and waits for it to exit.
+        No-op if it isn't running."""
+        if not self.is_alive():
+            return
+        _write_framed(_action_fifo_path(self.pipe_dir), {"cmd": "stop"})
+        pid_file = _pid_file_path(self.pipe_dir)
+        deadline = time.time() + timeout
+        while os.path.exists(pid_file):
+            if time.time() > deadline:
+                raise TimeoutError(f"daemon failed to stop within {timeout}s")
+            time.sleep(0.05)
 
+    def step(self, action, **kwargs):
+        return self._update(self._send("step", action=action, **kwargs))
 
-def call(pipe_dir, cmd, action=None, timeout=30):
-    """Sends one request and returns the daemon's one response.
+    def reset(self, **kwargs):
+        return self._update(self._send("reset", **kwargs))
 
-    cmd is "step" (requires `action`, an int index into
-    `nle.nethack.ACTIONS`) or "reset". Raises RuntimeError if the daemon
-    rejected the request (e.g. an out-of-range action) or TimeoutError if
-    no response arrives within `timeout` seconds -- the daemon stays alive
-    and reusable in both cases.
-    """
-    if not is_alive(pipe_dir):
-        raise RuntimeError(f"daemon not running (pipe_dir={pipe_dir})")
-    msg = {"cmd": cmd}
-    if action is not None:
-        msg["action"] = action
-    _write_framed(_action_fifo_path(pipe_dir), msg)
-    response = _read_framed(_obs_fifo_path(pipe_dir), timeout=timeout)
-    if response is not None and not response.get("ok", True):
-        raise RuntimeError(f"daemon rejected request: {response['error']}")
-    return response
+    def _send(self, cmd, action=None, timeout=30):
+        """Sends one request and returns the daemon's one response.
+
+        cmd is "step" (requires `action`, an int index into
+        `nle.nethack.ACTIONS`) or "reset". Raises RuntimeError if the
+        daemon rejected the request (e.g. an out-of-range action) or
+        TimeoutError if no response arrives within `timeout` seconds --
+        the daemon stays alive and reusable in both cases.
+        """
+        if not self.is_alive():
+            raise RuntimeError(f"daemon not running (pipe_dir={self.pipe_dir})")
+        msg = {"cmd": cmd}
+        if action is not None:
+            msg["action"] = action
+        _write_framed(_action_fifo_path(self.pipe_dir), msg)
+        response = _read_framed(_obs_fifo_path(self.pipe_dir), timeout=timeout)
+        if response is not None and not response.get("ok", True):
+            raise RuntimeError(f"daemon rejected request: {response['error']}")
+        return response
+
+    def _update(self, response):
+        self.obs = response["obs"]
+        self.reward = response["reward"]
+        self.done = response["done"]
+        self.truncated = response["truncated"]
+        self.info = response["info"]
+        return self.obs
 
 
 def _run(pipe_dir, character, max_episode_steps):

@@ -145,16 +145,15 @@ whose lifecycle is independent of any single caller, and exchanges one
 action/observation pair per call over two POSIX FIFOs:
 
 ```python
->>> from nle.scripts import nle_daemon
->>> pipe_dir = "/tmp/nle-daemon"
->>> nle_daemon.start(pipe_dir)  # spawns the daemon, blocks until ready
->>> nle_daemon.is_alive(pipe_dir)
+>>> from nle.scripts.nle_daemon import NLEDaemon
+>>> d = NLEDaemon("/tmp/nle-daemon").start()  # spawns the daemon, blocks until ready
+>>> d.is_alive()
 True
->>> response = nle_daemon.call(pipe_dir, "step", action=0)
->>> response["obs"]["glyphs"]
+>>> d.step(0)
+>>> d.obs["glyphs"]
 ...
->>> nle_daemon.call(pipe_dir, "reset")
->>> nle_daemon.stop(pipe_dir)  # blocks until the daemon has exited
+>>> d.reset()
+>>> d.stop()  # blocks until the daemon has exited
 ```
 
 It does not survive the daemon process itself dying (crash, OOM-kill, host
