@@ -138,6 +138,30 @@ $ python -m nle.scripts.play --help
 Note that `nle.scripts.play` can also be run with `nle-play`, if the package
 has been properly installed.
 
+### Driving a live episode across separate calls
+
+`nle.scripts.nle_daemon` holds one live NLE episode in a background process
+whose lifecycle is independent of any single caller, and exchanges one
+action/observation pair per call over two POSIX FIFOs:
+
+```python
+>>> from nle.scripts import nle_daemon
+>>> pipe_dir = "/tmp/nle-daemon"
+>>> nle_daemon.start(pipe_dir)  # spawns the daemon, blocks until ready
+>>> nle_daemon.is_alive(pipe_dir)
+True
+>>> response = nle_daemon.call(pipe_dir, "step", action=0)
+>>> response["obs"]["glyphs"]
+...
+>>> nle_daemon.call(pipe_dir, "reset")
+>>> nle_daemon.stop(pipe_dir)  # blocks until the daemon has exited
+```
+
+It does not survive the daemon process itself dying (crash, OOM-kill, host
+reboot) -- a caller reconnecting later against a still-alive daemon is the
+failure mode this covers. See the pynle wiki's
+`decisions/adr-01-live-episode-turn-driver.md` for the full record.
+
 Additionally, a [TorchBeast](https://github.com/facebookresearch/torchbeast)
 agent is bundled in `nle.agent` together with a simple model to provide a
 starting point for experiments:
