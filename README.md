@@ -81,6 +81,23 @@ $ pre-commit install
 ```
 
 
+## Development workflow
+
+Requires: [`cmake`, `uv`](#installation) already installed.
+
+The steps above under "extend / develop NLE" are also available as `make`
+targets from the repo root, for the `uv`-based workflow:
+
+1. `make setup` -- one-time: checks `uv`/`cmake` are available, installs the
+   `pre-commit` git hook.
+2. `make test` -- day-to-day: builds the compiled extension
+   (`uv sync --extra dev`, automatic since `test` depends on `build`), then
+   runs `pytest`.
+3. `make check-pins` / `make status` -- anytime, read-only checks.
+
+Run `make help` for the full target list.
+
+
 ## Docker
 
 We have provided some docker images. Please see the [relevant
