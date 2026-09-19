@@ -8,6 +8,7 @@ import numpy as np
 import pytest
 
 from nle import nethack
+from nle.env.base import NLE
 from nle.scripts import claude_play, game_log
 from nle.scripts.nle_daemon import NLEDaemon
 
@@ -103,6 +104,15 @@ class TestAllocate:
         assert os.path.basename(fourth)[:3] == "005"
         assert os.path.exists(third) and os.path.getsize(third) == 0
 
+    def test_exclusive_create_fails_instead_of_appending(self, tmp_path, monkeypatch):
+        existing = tmp_path / "001_nle_daemon.jsonl"
+        existing.write_text("keep\n")
+        # The allocator now predicts 001 again, as if two writers raced.
+        monkeypatch.setattr(os, "listdir", lambda d: [])
+        with pytest.raises(FileExistsError):
+            game_log.allocate_game_file(str(tmp_path))
+        assert existing.read_text() == "keep\n"
+
 
 class TestResetGame:
     def test_fresh_game_writes_game_then_session(self, dirs):
@@ -164,6 +174,7 @@ class TestLogStep:
             (make_obs(t=4, depth=2, hp=0, top="You die..."), True),
         ]
         d = FakeDaemon(pipe_dir, script=script)
+        d.info = {"end_status": NLE.StepStatus.DEATH}
         path = game_log.reset_game(d, None, state_dir)
 
         for action in (12, 13, 14):
@@ -187,7 +198,8 @@ class TestLogStep:
         assert records[4]["event"]["kind"] == "level"
         assert records[4]["event"]["dlvl"] == 2 and "screen" in records[4]["event"]
         assert records[6]["event"]["kind"] == "death"
-        assert records[6]["event"]["cause"] == "You die..."
+        assert records[6]["event"]["end_status"] == "DEATH"
+        assert "cause" not in records[6]["event"]
 
     def test_prompt_flag_comes_from_misc(self, dirs):
         pipe_dir, state_dir = dirs
@@ -222,6 +234,10 @@ class TestClaudePlay:
     def test_a_trailing_modifier_is_an_error(self):
         with pytest.raises(SystemExit):
             claude_play.parse_keys("h^")
+
+    def test_help_prints_usage_and_exits_zero(self, capsys):
+        claude_play.main(["--help"])  # returns normally: exit status 0
+        assert "Key syntax" in capsys.readouterr().out
 
     def test_unknown_key_is_rejected_before_any_step(self, dirs):
         pipe_dir, state_dir = dirs

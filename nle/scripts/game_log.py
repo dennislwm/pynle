@@ -176,7 +176,14 @@ def log_step(daemon, action, prev_obs, state_dir=STATE_DIR):
     if _bl(obs, nethack.NLE_BL_DEPTH) != _bl(prev_obs, nethack.NLE_BL_DEPTH):
         _event(daemon, path, "level", screen=screen(obs))
     if daemon.done:
-        _event(daemon, path, "death", cause=screen_line(obs, 0), screen=screen(obs))
+        end = daemon.info.get("end_status")
+        _event(
+            daemon,
+            path,
+            "death",
+            end_status=getattr(end, "name", end),
+            screen=screen(obs),
+        )
     return path
 
 

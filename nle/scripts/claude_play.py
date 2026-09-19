@@ -5,6 +5,7 @@ game_state/ (see nle/scripts/game_log.py and ADR-02).
   --start           spawn the daemon
   --reset           start a new game, or resume a saved one
   --stop [save]     stop the daemon (save: write a save file first)
+  --help            print this text
   <keys>            send keys, print the screen
 
 Key syntax: ~ is ESC, | is Enter, ^x is ctrl-x, &x is meta-x (&l is #loot),
@@ -115,6 +116,8 @@ def main(argv):
         elif verb == "--reset":
             print("game file:", game_log.reset_game(daemon, CHARACTER))
             print_screen(daemon)
+        elif verb == "--help":
+            print(__doc__)
         else:
             raise SystemExit(__doc__)
     elif len(argv) > 1:

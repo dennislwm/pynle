@@ -186,14 +186,15 @@ Saving only ever succeeds once per episode -- NetHack's own save flag is
 zeroed after a successful save and never re-armed during normal play, so
 `save()` is wired into shutdown rather than offered as a repeatable
 mid-episode action. A plain `stop()` (no `save=True`) leaves nothing behind
-to resume.
+to resume. Each resume starts a new process, so a resumed game can be saved
+again.
 
 ### Recording a claude-play game
 
 See the pynle wiki's `decisions/adr-02-per-game-jsonl-record.md`. Claude
 playing: see [CLAUDE.md](CLAUDE.md).
 
-Requires: [`make build`](#development-workflow) once, so `uv run` works.
+Requires: [`make build`](#development-workflow) run once.
 
 `nle.scripts.claude_play` drives the daemon one call at a time and records
 each game to one jsonl file in `game_state/` (untracked), one top-level key
@@ -203,8 +204,12 @@ per line:
 2. `make play ARGS='--reset'` starts a new game, or resumes a saved one, and
    prints the game file.
 3. `make play ARGS='hjkl'` sends the keys and prints the screen. A batch stops
-   early on HP loss, `--More--`, a `[yn]` prompt or a hunger warning, and the
-   stop is recorded as a note tagged `violation`.
+   early when:
+   - HP drops.
+   - The game shows `--More--` or a `[yn]` prompt.
+   - A hunger warning appears.
+
+   Each early stop is recorded as a note tagged `violation`.
 4. `make play ARGS='--stop save'` saves and stops. `--start` then `--reset`
    resumes into the same file. A plain `--stop` ends the game, and the next
    `--reset` opens a new file.
