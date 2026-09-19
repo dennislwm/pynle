@@ -65,6 +65,7 @@ Rules games taught, from this repo's own games or the reference's. Mechanical ro
 | S22 | Loot | A high-value price-ID with no identify path | Sell it, or use it under controlled conditions (full HP, cleared room, nothing adjacent), this visit; never sell worn gear or tools | Discipline | ref: Entering a shop, 12 logs with no identify or altar |
 | S23 | Process | Ending a turn after ordinary progress | State the decision and go on; do not ask "keep going?" | Discipline | ref: Process row, confirmed 3 times |
 | S24 | Process | A call returns REFUSED or STOPPED | Stop, read the screen and name the cause before the next key. Never repeat the same call or loop it | Discipline | 002:1542 to 002:1547 |
+| S25 | Navigation | Ending a farlook (`;`) | Press Esc, not `.`. The name already shows on the top line as the cursor moves | Discipline | 002:1065, 002:2203 (9 of 10 lone-`.` refusals in 002) |
 
 Every time a game ends or you run `--stop` (with or without `save`): take the `mistake` and `violation` notes, and any `death` event, after the last note whose text starts `Gate-table check:`. For each, save an `insight` note `Gate-table check: Mechanical / Soft / Discipline / no row, generic / pynle-specific -- <reason>` (add `-> <Id>` when you file a row) and print it. For a `death` event only, also ask whether an exit was in reach and whether an escape or defensive item went unused.
 
