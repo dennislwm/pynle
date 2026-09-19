@@ -132,9 +132,15 @@ class NLEDaemon:
         save_dir = os.path.join(self.pipe_dir, "save")
         return os.path.isdir(save_dir) and bool(os.listdir(save_dir))
 
-    def start(self, character="mon-hum-neu-mal", max_episode_steps=5000, timeout=60):
+    def start(
+        self, character="mon-hum-neu-mal", max_episode_steps=sys.maxsize, timeout=60
+    ):
         """Starts the daemon as a standalone background process, detached
-        from this caller's session, and waits for it to report ready."""
+        from this caller's session, and waits for it to report ready.
+
+        max_episode_steps defaults to no cap: NLE's own 5000 is a training
+        bound that force-quits the game (end_status ABORTED), which a game
+        played to its end should not hit."""
         if self.is_alive():
             raise RuntimeError(f"daemon already running (pipe_dir={self.pipe_dir})")
         # is_alive() already confirmed the process behind any existing

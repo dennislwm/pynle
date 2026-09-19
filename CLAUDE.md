@@ -10,7 +10,8 @@ Before the first key of a session:
 
 1. Read your past notes. "No such file" means there are none yet. Old notes may name `pipenv` or `play.py`; the commands here and in the README are current.
    `jq -cR 'fromjson? | .event? | select(.tag == "hint" or .tag == "mistake") | {tag, when, text, rule} | with_entries(select(.value != null))' game_state/*.jsonl`
-2. `make play ARGS='--reset'` starts a new game or resumes a saved one.
+2. `make play ARGS='--start'` spawns the daemon. An "already running" error means it is.
+3. `make play ARGS='--reset'` starts a new game or resumes a saved one.
 
 On every call:
 
@@ -22,12 +23,11 @@ Constraints:
 
 - `--reset` on a running game abandons it and opens a new game file. To keep a game, `--stop save` first.
 - Run one `make play` call at a time: the pipes have one reader and one writer and no lock.
-- A session is cut off at 5000 steps, and a resumed game gets a fresh budget. Save before you get there.
 - `game_state/*.jsonl` is append-only. Never edit or delete a line or a file.
 
 To end a session use `make play ARGS='--stop save'` (resumes later, and it can be repeated) or a plain `--stop` (ends the game).
 
-Recording a lesson, until `make play` has a `--note` verb (tags: `mistake`, `insight`, `hint`, `item_id`):
+Recording a lesson (needs a game started with `--reset`), until `make play` has a `--note` verb (tags: `mistake`, `insight`, `hint`, `item_id`):
 `jq -nc --arg tag mistake --arg text "<what happened, and the rule>" '{event:{kind:"note",tag:$tag,text:$text}}' >> "$(cat /tmp/nle-daemon/game.log)"`
 
 ## Working on this repo
