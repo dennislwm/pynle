@@ -94,6 +94,8 @@ targets from the repo root, for the `uv`-based workflow:
    (`uv sync --extra dev`, automatic since `test` depends on `build`), then
    runs `pytest`.
 3. `make check-pins` / `make status` -- anytime, read-only checks.
+4. `make play ARGS='--reset'` -- drive a live game and record it, see
+   [Recording a claude-play game](#recording-a-claude-play-game).
 
 Run `make help` for the full target list.
 
@@ -185,6 +187,46 @@ zeroed after a successful save and never re-armed during normal play, so
 `save()` is wired into shutdown rather than offered as a repeatable
 mid-episode action. A plain `stop()` (no `save=True`) leaves nothing behind
 to resume.
+
+### Recording a claude-play game
+
+See the pynle wiki's `decisions/adr-02-per-game-jsonl-record.md`.
+
+Requires: [`make build`](#development-workflow) once, so `uv run` works.
+
+`nle.scripts.claude_play` drives the daemon one call at a time and records
+each game to one jsonl file in `game_state/` (untracked), one top-level key
+per line:
+
+1. `make play ARGS='--start'` spawns the daemon.
+2. `make play ARGS='--reset'` starts a new game, or resumes a saved one, and
+   prints the game file.
+3. `make play ARGS='hjkl'` sends the keys and prints the screen. A batch stops
+   early on HP loss, `--More--`, a `[yn]` prompt or a hunger warning, and the
+   stop is recorded as a note tagged `violation`.
+4. `make play ARGS='--stop save'` saves and stops. `--start` then `--reset`
+   resumes into the same file. A plain `--stop` ends the game, and the next
+   `--reset` opens a new file.
+
+Keys: `~` is ESC, `|` is Enter, `^x` is ctrl-x, `&x` is meta-x, a backtick is
+a literal caret. Pass them as one quoted argument, because a space is a key
+too. For a key the shell or `make` would eat (such as `"`), call
+`uv run python -m nle.scripts.claude_play '<keys>'` directly.
+
+The file has four kinds of line: `game` (once, first), `session` (one per
+start or resume), `logs` (one per step) and `event` (`kind` is `death`,
+`note` or `level`). Query it with `jq`:
+
+```bash
+# HP by turn
+jq -r 'select(has("logs")) | [.logs.t, .logs.hp, .logs.dlvl] | @tsv' game_state/002_nle_daemon.jsonl
+# deaths and notes, violations included
+jq -c 'select(.event.kind == "death" or .event.kind == "note") | .event' game_state/002_nle_daemon.jsonl
+```
+
+Guard every comparison with `has("logs")`: in `jq` a missing key sorts below
+any number, so `select(.logs.hp < 10)` also matches the `game` line. After a
+hard kill the last line can be cut off; `jq -cR 'fromjson? | ...'` skips it.
 
 Additionally, a [TorchBeast](https://github.com/facebookresearch/torchbeast)
 agent is bundled in `nle.agent` together with a simple model to provide a

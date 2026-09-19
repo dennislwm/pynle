@@ -58,6 +58,27 @@ class TestNLEDaemon:
         d.step(0)
         assert "glyphs" in d.obs
 
+    def test_pid_and_has_save(self, pipe_dir):
+        """A caller can tell a resume from a fresh game, and which daemon
+        process it is talking to, through NLEDaemon alone."""
+        d = NLEDaemon(pipe_dir)
+        assert d.pid() is None
+        assert not d.has_save()
+
+        d.start()
+        assert d.pid() == int(open(os.path.join(pipe_dir, "daemon.pid")).read())
+        d.reset()
+        assert not d.has_save()
+
+        d.step(1)
+        d.stop(save=True)
+        assert d.pid() is None
+        assert d.has_save()
+
+        d2 = NLEDaemon(pipe_dir).start()
+        d2.reset()
+        assert not d2.has_save()  # a successful restore deletes the save file
+
     def test_start_twice_raises(self, pipe_dir):
         """Idempotency: a second start() against a live daemon must not
         spawn a duplicate process or corrupt the PID file -- it raises."""

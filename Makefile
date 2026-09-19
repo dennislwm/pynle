@@ -3,7 +3,7 @@
 # it overwrites this file with a template-generated one (Makefile.top).
 # The actual build path for this fork is 'make build' (uv sync -> CMake
 # via scikit-build-core), documented in README.md.
-.PHONY: help setup status test build check-pins
+.PHONY: help setup status test build check-pins play
 SHELL := /bin/bash
 
 help:
@@ -15,6 +15,7 @@ help:
 	@echo "  build         Build the compiled extension via 'uv sync --extra dev'"
 	@echo "  test          Run pytest (depends on build)"
 	@echo "  check-pins    Fail if any pyproject.toml dependency is unpinned"
+	@echo "  play          Drive the live NLE daemon and record the game: make play ARGS='--reset'"
 	@echo ""
 
 setup:
@@ -31,3 +32,6 @@ test: build
 
 check-pins:
 	@source ./make.sh && check_pins
+
+play:
+	uv run python -m nle.scripts.claude_play "$(ARGS)"

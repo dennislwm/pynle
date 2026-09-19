@@ -116,6 +116,22 @@ class NLEDaemon:
             return False
         return True
 
+    def pid(self):
+        """The live daemon's PID, or None if none is running."""
+        if not self.is_alive():
+            return None
+        with open(_pid_file_path(self.pipe_dir)) as f:
+            return int(f.read().strip())
+
+    def has_save(self):
+        """True if a save file is waiting in this pipe_dir's `save/`
+        directory, i.e. the next reset() would resume it (a successful
+        restore deletes it, src/restore.c:901-902). Lets a caller tell a
+        resume from a fresh game without reading NLE's directory layout
+        itself."""
+        save_dir = os.path.join(self.pipe_dir, "save")
+        return os.path.isdir(save_dir) and bool(os.listdir(save_dir))
+
     def start(self, character="mon-hum-neu-mal", max_episode_steps=5000, timeout=60):
         """Starts the daemon as a standalone background process, detached
         from this caller's session, and waits for it to report ready."""
