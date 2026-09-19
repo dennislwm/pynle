@@ -215,3 +215,7 @@ CMakePresets.json
 
 # cibuildwheel
 wheelhouse/
+# NLE daemon gameplay notes (local, not tracked)
+game_state/
+Pipfile
+Pipfile.lock
