@@ -13,8 +13,11 @@ a backtick is a literal caret, anything else is sent as typed. A batch stops
 early on HP loss, --More--, a [yn] prompt or a hunger warning; each early stop
 is recorded as a note tagged "violation". Before any key is sent, a batch is
 refused (and recorded the same way) by gate G2 (more than one key with a peaceful
-within 2 squares), G4 (rest or search with a hostile in view, or more than 10
-turns) or G7 (a move or F into a gas spore).
+within 2 squares), G3 (F at a tame or peaceful monster, or a move into a peaceful
+one), G4 (rest or search with a hostile in view, or more than 10 turns), G5 (rest
+or search while Hungry, Weak or Fainting), G7 (a move or F into a gas spore or a
+floating eye) or G8 (more than one action with a hostile adjacent; F and its
+direction count as one). G4 and G5 apply only to a batch of digits, s and . .
 """
 import sys
 
@@ -89,37 +92,64 @@ def _monsters(obs):
     return found
 
 
+def _hostile(descr):
+    return not descr.startswith(("tame ", "peaceful "))
+
+
+def _first_target(pairs, monsters):
+    """(fight, description) of the monster the batch's first move or F lands
+    on, else None. Later keys land on squares that depend on the earlier ones."""
+    codes = [c for _, c in pairs[:2]]
+    fight = len(codes) > 1 and codes[0] == ord("F")
+    key = chr(codes[1] if fight else codes[0]) if codes else ""
+    if key not in DIRECTIONS:
+        return None
+    for dy, dx, descr in monsters:
+        if (dy, dx) == DIRECTIONS[key]:
+            return fight, descr
+    return None
+
+
 def check_batch(pairs, obs):
     """A gate id and message if the batch must not be sent (ADR-03), else None.
     Reads monster hostility from description prefixes, so it can miss while
-    hallucinating. G7 only looks at the batch's first move: later keys land
-    on squares that depend on the earlier ones."""
+    hallucinating. Rest gates (G4, G5) look only at a batch made of digits, s
+    and ., because a . or s elsewhere may answer a prompt (the travel confirm
+    in `_<.`). The driver keeps no state between calls, so a lone . that
+    confirms a prompt opened by an earlier call still counts as a rest."""
     monsters = _monsters(obs)
     if len(pairs) > 1:
         for dy, dx, descr in monsters:
             if max(abs(dy), abs(dx)) <= 2 and descr.startswith("peaceful "):
                 return "G2", f"{len(pairs)} keys with a peaceful ({descr}) within 2 squares: send one key per call"
+        actions = sum(1 for _, c in pairs if c != ord("F"))  # F is a prefix: Fh is one attack
+        for dy, dx, descr in monsters:
+            if actions > 1 and max(abs(dy), abs(dx)) <= 1 and _hostile(descr):
+                return "G8", f"{actions} actions with a hostile ({descr or '?'}) adjacent: send one action per call"
+    target = _first_target(pairs, monsters)
+    if target:
+        fight, descr = target
+        if descr.startswith("peaceful ") or (fight and descr.startswith("tame ")):
+            return "G3", f"a {'fight' if fight else 'move'} into a {descr}"
     total, digits = 0, ""
-    for _, code in pairs:
-        if chr(code).isdigit():
-            digits += chr(code)
-        else:
-            if chr(code) in "s.":
+    if all(chr(c).isdigit() or chr(c) in "s." for _, c in pairs):
+        for _, code in pairs:
+            if chr(code).isdigit():
+                digits += chr(code)
+            else:
                 total += int(digits or 1)
-            digits = ""
+                digits = ""
     if total:
-        if any(not d.startswith(("tame ", "peaceful ")) for _, _, d in monsters):
-            return "G4", "rest or search with a hostile monster in view"
+        if any(w in game_log.screen_line(obs, 23) for w in HUNGER):
+            return "G5", "rest or search while Hungry, Weak or Fainting"
+        hostile = [(max(abs(dy), abs(dx)), descr) for dy, dx, descr in monsters if _hostile(descr)]
+        if hostile:
+            distance, descr = min(hostile)
+            return "G4", f"rest or search with a hostile monster in view ({descr or '?'}, {distance} away)"
         if total > REST_CAP:
             return "G4", f"rest or search {total} turns in one call (cap {REST_CAP})"
-    moves = [c for _, c in pairs[:2]]
-    if moves and moves[0] == ord("F") and len(moves) > 1:
-        moves = moves[1:]
-    if moves and chr(moves[0]) in DIRECTIONS:
-        dy, dx = DIRECTIONS[chr(moves[0])]
-        for my, mx, descr in monsters:
-            if (my, mx) == (dy, dx) and "gas spore" in descr:
-                return "G7", "a move or F into a gas spore (it explodes)"
+    if target and any(name in target[1] for name in ("gas spore", "floating eye")):
+        return "G7", f"a move or F into a {target[1]}"
     return None
 
 

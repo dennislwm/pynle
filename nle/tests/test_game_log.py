@@ -13,10 +13,11 @@ from nle.scripts import claude_play, game_log
 from nle.scripts.nle_daemon import NLEDaemon
 
 
-def make_obs(t=1, depth=1, hp=13, top="", misc=(0, 0, 0), exp=0, score=0):
+def make_obs(t=1, depth=1, hp=13, top="", misc=(0, 0, 0), exp=0, score=0, dnum=0):
     blstats = np.zeros(27, dtype=np.int64)
     blstats[nethack.NLE_BL_EXP] = exp
     blstats[nethack.NLE_BL_SCORE] = score
+    blstats[nethack.NLE_BL_DNUM] = dnum
     blstats[nethack.NLE_BL_TIME] = t
     blstats[nethack.NLE_BL_DEPTH] = depth
     blstats[nethack.NLE_BL_HP] = hp
@@ -215,6 +216,15 @@ class TestLogStep:
         for key in ("dlvl", "xp", "gold", "hpmax", "pwmax", "ac"):
             assert key in logs
 
+    def test_logs_line_records_the_dungeon_number(self, dirs):
+        pipe_dir, state_dir = dirs
+        d = FakeDaemon(pipe_dir, script=[(make_obs(dnum=2), False)])
+        path = game_log.reset_game(d, None, state_dir)
+        prev = d.obs
+        d.step(12)
+        game_log.log_step(d, 12, prev, state_dir)
+        assert lines(path)[-1]["logs"]["dnum"] == 2
+
     def test_prompt_flag_comes_from_misc(self, dirs):
         pipe_dir, state_dir = dirs
         d = FakeDaemon(
@@ -300,6 +310,14 @@ def gate_obs(monsters, hero=(5, 5)):
     return obs
 
 
+def status_obs(monsters, status):
+    """gate_obs with `status` on the bottom screen line."""
+    obs = gate_obs(monsters)
+    for i, ch in enumerate(status):
+        obs["tty_chars"][23, i] = ord(ch)
+    return obs
+
+
 class TestGates:
     def gate(self, keys, monsters):
         return claude_play.check_batch(claude_play.parse_keys(keys), gate_obs(monsters))
@@ -315,6 +333,46 @@ class TestGates:
     def test_g4_rest_with_a_hostile_in_view(self):
         assert self.gate("5s", {(1, 1): "jackal"})[0] == "G4"
         assert self.gate("s", {(1, 1): "peaceful watchman"}) is None
+
+    def test_g4_only_counts_a_batch_of_rest_keys(self):
+        """Game 002, t=1473: the travel call `_<.` was refused as a rest. A `.`
+        or `s` that confirms or answers a prompt is not a rest."""
+        jackal = {(1, 1): "jackal"}
+        assert self.gate("_<.", jackal) is None
+        assert self.gate(";l.", jackal) is None  # a farlook confirm
+        assert self.gate("ws", jackal) is None  # an item letter
+        assert self.gate("5s", jackal)[0] == "G4"
+        assert self.gate(".", jackal)[0] == "G4"
+
+    def test_g4_names_the_nearest_hostile_and_its_distance(self):
+        message = self.gate("5s", {(1, 1): "jackal", (2, 3): "newt"})[1]
+        assert "newt" in message and "3 away" in message
+
+    def test_g5_rest_while_hungry_weak_or_fainting(self):
+        for status in ("Hungry", "Weak", "Fainting"):
+            assert claude_play.check_batch(claude_play.parse_keys("5s"), status_obs({}, status))[0] == "G5"
+        assert claude_play.check_batch(claude_play.parse_keys("h"), status_obs({}, "Hungry")) is None
+        assert self.gate("5s", {}) is None
+
+    def test_g8_batch_with_a_hostile_adjacent(self):
+        assert self.gate("hh", {(5, 4): "jackal"})[0] == "G8"
+        assert self.gate("h", {(5, 4): "jackal"}) is None  # one key per call is the point
+        assert self.gate("hh", {(5, 3): "jackal"}) is None  # 2 squares away
+        assert self.gate("hh", {(5, 4): "tame little dog"}) is None
+        assert self.gate("hh", {(5, 4): "peaceful watchman"})[0] == "G2"
+        assert self.gate("Fh", {(5, 4): "jackal"}) is None  # F plus a direction is one attack
+        assert self.gate("FhFh", {(5, 4): "jackal"})[0] == "G8"
+
+    def test_g3_fight_a_pet_or_walk_into_a_peaceful(self):
+        assert self.gate("Fh", {(5, 4): "tame little dog"})[0] == "G3"
+        assert self.gate("h", {(5, 4): "peaceful watchman"})[0] == "G3"
+        assert self.gate("h", {(5, 4): "tame little dog"}) is None  # a swap
+        assert self.gate("Fh", {(5, 4): "jackal"}) is None
+
+    def test_g7_also_refuses_a_floating_eye(self):
+        assert self.gate("l", {(5, 6): "floating eye"})[0] == "G7"
+        assert self.gate("Fl", {(5, 6): "floating eye"})[0] == "G7"
+        assert self.gate("h", {(5, 6): "floating eye"}) is None
 
     def test_g4_reads_the_count_prefix_and_caps_the_total(self):
         assert self.gate("300s", {})[0] == "G4"

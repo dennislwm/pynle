@@ -38,8 +38,11 @@ Rules games taught, from this repo's own games or the reference's. Mechanical ro
 | Id | Category | Trigger | Required action | Enforcement | Evidence |
 |---|---|---|---|---|---|
 | G2 | Combat | More than one key in a call while a peaceful is within 2 squares | One key per call. Never batch near a prompt (`y` answers yes): that half is Discipline, the driver checks only the peaceful | Mechanical | 001:10, 001:6 |
-| G4 | Combat | Rest or search (`s`, `.`, count prefix read) with a hostile in view, or more than 10 turns in one call | Deal with the monster first; rest in calls of 10 or fewer, watching HP | Mechanical | 001:5, 001:33, 002:918 |
-| G7 | Combat | A move or `F` into a gas spore | Never melee it; keep away or attack from range | Mechanical | 001:7 |
+| G3 | Combat | `F` at a tame or peaceful monster, or a move into a peaceful one (a move into a tame pet is a swap) | Never attack them; route around | Mechanical | 001:3, 001:6, 001:10 |
+| G4 | Combat | A call made only of digits, `s` and `.` (a rest or search, count prefix read) with a hostile in view, or more than 10 turns | Deal with the monster first; rest in calls of 10 or fewer, watching HP. The refusal names the nearest hostile and its distance. A `.` or `s` that answers a prompt inside a longer call (`_<.`) is not a rest | Mechanical | 001:5, 001:33, 002:918, 002:1377 |
+| G5 | Combat | A rest or search call while the status line shows Hungry, Weak or Fainting | Eat first | Mechanical | 001:5 |
+| G7 | Combat | A move or `F` into a gas spore or a floating eye | Never melee it; keep away or attack from range | Mechanical | 001:7, ref: Procedure 5 |
+| G8 | Combat | More than one action in a call with a hostile adjacent (`F` and its direction count as one) | One action per call, checking HP between them | Mechanical | ref: Threat ladder rung 3, jackal death |
 | S1 | Loot | A corpse you did not kill, on a square you are about to enter | Treat it as a trap square: skip it, or enter only at HP above 70 percent and not fleeing. A corpse you just killed is a loot event (S9) | Soft | 001:8, 002:296 |
 | S4 | Descent | Before `>`: HP at or below 70 percent, or a hunger or status warning | Rest or heal first, unless fleeing or using a trap door on purpose. Rest only on the upstairs or in a dead end | Soft | 001:37, 002:918 |
 | S5 | Combat | A hostile adjacent and HP at or below twice its largest hit | Disengage first; if retreat will not open distance (a monster as fast as you), engrave Elbereth (humans `@` and minotaurs ignore it). `pray` does not cancel its next attack: last resort | Discipline | ref: Threat ladder, prayer death; 002:1939 |

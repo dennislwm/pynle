@@ -159,6 +159,7 @@ def log_step(daemon, action, prev_obs, state_dir=STATE_DIR):
         {
             "t": _bl(obs, nethack.NLE_BL_TIME),
             "dlvl": _bl(obs, nethack.NLE_BL_DEPTH),
+            "dnum": _bl(obs, nethack.NLE_BL_DNUM),
             "hp": _bl(obs, nethack.NLE_BL_HP),
             "hpmax": _bl(obs, nethack.NLE_BL_HPMAX),
             "pw": _bl(obs, nethack.NLE_BL_ENE),
