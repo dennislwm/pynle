@@ -42,11 +42,11 @@ Rules games taught, from this repo's own games or the reference's. Mechanical ro
 | G7 | Combat | A move or `F` into a gas spore | Never melee it; keep away or attack from range | Mechanical | 001:7 |
 | S1 | Loot | A corpse you did not kill, on a square you are about to enter | Treat it as a trap square: skip it, or enter only at HP above 70 percent and not fleeing. A corpse you just killed is a loot event (S9) | Soft | 001:8, 002:296 |
 | S4 | Descent | Before `>`: HP at or below 70 percent, or a hunger or status warning | Rest or heal first, unless fleeing or using a trap door on purpose. Rest only on the upstairs or in a dead end | Soft | 001:37, 002:918 |
-| S5 | Combat | HP critical with a hostile adjacent | Disengage first; if retreat will not open distance (a monster as fast as you), engrave Elbereth (humans `@` and minotaurs ignore it). `pray` does not cancel its next attack: last resort | Discipline | ref: Threat ladder, prayer death |
-| S6 | Combat | A heavy hitter or stealer in view, not adjacent | Fire or throw first; leave by an open route if HP falls fast | Discipline | ref: Threat ladder, rothe and chameleon death |
+| S5 | Combat | A hostile adjacent and HP at or below twice its largest hit | Disengage first; if retreat will not open distance (a monster as fast as you), engrave Elbereth (humans `@` and minotaurs ignore it). `pray` does not cancel its next attack: last resort | Discipline | ref: Threat ladder, prayer death; 002:1939 |
+| S6 | Combat | A heavy hitter or stealer in view, not adjacent | Fire or throw first; leave by an open route if HP falls fast. Drop carried gold first | Discipline | ref: Threat ladder, rothe and chameleon death; 002:1621 |
 | S7 | Combat | A floating eye, mold, lichen or acid blob adjacent | Never melee a floating eye (paralysis), no exception. Mold or lichen: route around or shoot. Acid blob only: melee when it is the sole way past and nothing ranged remains | Discipline | ref: Procedure 5, acid blob corridor |
 | S8 | Combat | A hostile that S5 to S7 and G7 do not flag (never a peaceful) | Kill it: XP raises HP. Keep descending | Discipline | goal metrics; no incident |
-| S9 | Loot | A kill you made leaves an item or a corpse | Step on it and read "Things that are here" this turn | Discipline | ref: Procedure 6, mummy drop |
+| S9 | Loot | A kill you made leaves an item or a corpse | Step on it and read "Things that are here" this turn. A Monk does not eat the corpse (meat gives "You feel guilty") | Discipline | ref: Procedure 6, mummy drop; 002:1798 |
 | S10 | Loot | An unidentified wand picked up, no hostile adjacent | Engrave-test it the same turn | Discipline | ref: Procedure 6, untested wand at death |
 | S11 | Loot | A chest or box | Loot it where it lies; force it only if locked. Take items from the list (`o`, then `a`), never with `A`, and never take a gray stone | Discipline | ref: Procedure 6, encumbrance; 002:1538 |
 | S12 | Loot | Weapon or armor found, while `CHARACTER` is a Monk | Fight bare-handed and wear no armor by default | Discipline | ref: guidebook lines 137 and 3078 (only these two checked) |
@@ -63,7 +63,12 @@ Rules games taught, from this repo's own games or the reference's. Mechanical ro
 | S23 | Process | Ending a turn after ordinary progress | State the decision and go on; do not ask "keep going?" | Discipline | ref: Process row, confirmed 3 times |
 | S24 | Process | A call returns REFUSED or STOPPED | Stop, read the screen and name the cause before the next key. Never repeat the same call or loop it | Discipline | 002:1542 to 002:1547 |
 
-Every time a game ends or you run `--stop` (with or without `save`): for each `mistake` or `violation` note since the last check, and the `death` event, ask whether an exit was in reach and whether an escape or defensive item went unused, then print one line `Gate-table check: Mechanical / Soft / Discipline / no row, generic / pynle-specific -- <reason>`. Where a lesson needs a new or edited row, run `ponytail:ponytail-review` on the draft row (Id, Trigger, Required action, Enforcement, Evidence), apply its cuts, save it as a `hint` note, then file it in the gate table in the same check.
+Every time a game ends or you run `--stop` (with or without `save`): take the `mistake` and `violation` notes, and any `death` event, after the last note whose text starts `Gate-table check:`. For each, save an `insight` note `Gate-table check: Mechanical / Soft / Discipline / no row, generic / pynle-specific -- <reason>` (add `-> <Id>` when you file a row) and print it. For a `death` event only, also ask whether an exit was in reach and whether an escape or defensive item went unused.
+
+- Soft or Discipline lesson: edit the row that already covers it, else add a row with the next unused Id (Evidence cites the note's game file and line). Run `ponytail:ponytail-review` on it (if unavailable, cut it to one trigger and one action), apply its cuts, and edit this file. Run no git commands: leave the edit uncommitted for the operator to review with `git diff`.
+- Mechanical lesson, or a change to a Mechanical row: save a `hint` only, since it needs a driver gate.
+- Generic lesson: also save a `hint` for the operator. Never edit `../claude-code-nethack`.
 
 Recording a lesson (needs a game started with `--reset`), until `make play` has a `--note` verb (tags: `mistake`, `insight`, `hint`, `item_id`, `goal`):
-`jq -nc --arg tag mistake --arg text "<what happened, and the rule>" '{event:{kind:"note",tag:$tag,text:$text}}' >> "$(cat /tmp/nle-daemon/game.log)"`
+`jq -nc --arg tag <tag> --arg text "<what happened>" --arg rule "<the rule>" '{event:{kind:"note",tag:$tag,text:$text,rule:$rule}}' >> "$(cat /tmp/nle-daemon/game.log)"`
+A hand note carries no turn or level; the driver's notes do.
