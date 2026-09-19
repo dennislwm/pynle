@@ -210,6 +210,11 @@ per line:
    - A hunger warning appears.
 
    Each early stop is recorded as a note tagged `violation`.
+
+   Some batches are refused before any key is sent (`REFUSED <id>`). The
+   gates are G2 (more than one key near a peaceful), G4 (rest or search with a
+   hostile in view, or over 10 turns) and G7 (a move into a gas spore). The
+   `violation` note then carries a `gate` field and the `unsent` keys.
 4. `make play ARGS='--stop save'` saves and stops. `--start` then `--reset`
    resumes into the same file. A plain `--stop` ends the game, and the next
    `--reset` opens a new file.
