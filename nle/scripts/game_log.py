@@ -165,6 +165,8 @@ def log_step(daemon, action, prev_obs, state_dir=STATE_DIR):
             "pwmax": _bl(obs, nethack.NLE_BL_ENEMAX),
             "ac": _bl(obs, nethack.NLE_BL_AC),
             "xp": _bl(obs, nethack.NLE_BL_XP),
+            "exp": _bl(obs, nethack.NLE_BL_EXP),
+            "score": _bl(obs, nethack.NLE_BL_SCORE),
             "gold": _bl(obs, nethack.NLE_BL_GOLD),
             "x": _bl(obs, nethack.NLE_BL_X),
             "y": _bl(obs, nethack.NLE_BL_Y),

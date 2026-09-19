@@ -13,8 +13,10 @@ from nle.scripts import claude_play, game_log
 from nle.scripts.nle_daemon import NLEDaemon
 
 
-def make_obs(t=1, depth=1, hp=13, top="", misc=(0, 0, 0)):
+def make_obs(t=1, depth=1, hp=13, top="", misc=(0, 0, 0), exp=0, score=0):
     blstats = np.zeros(27, dtype=np.int64)
+    blstats[nethack.NLE_BL_EXP] = exp
+    blstats[nethack.NLE_BL_SCORE] = score
     blstats[nethack.NLE_BL_TIME] = t
     blstats[nethack.NLE_BL_DEPTH] = depth
     blstats[nethack.NLE_BL_HP] = hp
@@ -200,6 +202,18 @@ class TestLogStep:
         assert records[6]["event"]["kind"] == "death"
         assert records[6]["event"]["end_status"] == "DEATH"
         assert "cause" not in records[6]["event"]
+
+    def test_logs_line_records_the_goal_metrics(self, dirs):
+        pipe_dir, state_dir = dirs
+        d = FakeDaemon(pipe_dir, script=[(make_obs(exp=42, score=137), False)])
+        path = game_log.reset_game(d, None, state_dir)
+        prev = d.obs
+        d.step(12)
+        game_log.log_step(d, 12, prev, state_dir)
+        logs = lines(path)[-1]["logs"]
+        assert logs["exp"] == 42 and logs["score"] == 137
+        for key in ("dlvl", "xp", "gold", "hpmax", "pwmax", "ac"):
+            assert key in logs
 
     def test_prompt_flag_comes_from_misc(self, dirs):
         pipe_dir, state_dir = dirs
