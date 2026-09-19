@@ -222,8 +222,9 @@ per line:
      count as one).
 
    G4 and G5 apply only to a batch of digits, `s` and `.`, so `_<.` (travel)
-   is never a rest. The `violation` note carries a `gate` field and the
-   `unsent` keys.
+   is never a rest. G8 applies only to a batch of moves, `F`, `s`, `.` and
+   digits, so a cast, throw or quaff (which takes prompt answers) is not
+   refused. The `violation` note carries a `gate` field and the `unsent` keys.
 4. `make play ARGS='--stop save'` saves and stops. `--start` then `--reset`
    resumes into the same file. A plain `--stop` ends the game, and the next
    `--reset` opens a new file.

@@ -17,7 +17,8 @@ within 2 squares), G3 (F at a tame or peaceful monster, or a move into a peacefu
 one), G4 (rest or search with a hostile in view, or more than 10 turns), G5 (rest
 or search while Hungry, Weak or Fainting), G7 (a move or F into a gas spore or a
 floating eye) or G8 (more than one action with a hostile adjacent; F and its
-direction count as one). G4 and G5 apply only to a batch of digits, s and . .
+direction count as one). G4 and G5 apply only to a batch of digits, s and . ;
+G8 only to a batch of moves, F, s, . and digits, so a cast, throw or quaff is fine.
 """
 import sys
 
@@ -35,6 +36,7 @@ DIRECTIONS = {  # (dy, dx)
     "h": (0, -1), "j": (1, 0), "k": (-1, 0), "l": (0, 1),
     "y": (-1, -1), "u": (-1, 1), "b": (1, -1), "n": (1, 1),
 }
+TURN_KEYS = set(DIRECTIONS) | set("Fs.")  # keys that spend a turn on their own
 # step() takes an index into nethack.ACTIONS, not a key code.
 ACTION_INDEX = {int(a): i for i, a in enumerate(nethack.ACTIONS)}
 
@@ -115,17 +117,15 @@ def check_batch(pairs, obs):
     Reads monster hostility from description prefixes, so it can miss while
     hallucinating. Rest gates (G4, G5) look only at a batch made of digits, s
     and ., because a . or s elsewhere may answer a prompt (the travel confirm
-    in `_<.`). The driver keeps no state between calls, so a lone . that
-    confirms a prompt opened by an earlier call still counts as a rest."""
+    in `_<.`); G8 looks only at a batch of turn keys, so a move mixed with a
+    command (hZal) is not refused. The driver keeps no state between calls, so
+    a lone . that confirms a prompt opened by an earlier call still counts as
+    a rest."""
     monsters = _monsters(obs)
     if len(pairs) > 1:
         for dy, dx, descr in monsters:
             if max(abs(dy), abs(dx)) <= 2 and descr.startswith("peaceful "):
                 return "G2", f"{len(pairs)} keys with a peaceful ({descr}) within 2 squares: send one key per call"
-        actions = sum(1 for _, c in pairs if c != ord("F"))  # F is a prefix: Fh is one attack
-        for dy, dx, descr in monsters:
-            if actions > 1 and max(abs(dy), abs(dx)) <= 1 and _hostile(descr):
-                return "G8", f"{actions} actions with a hostile ({descr or '?'}) adjacent: send one action per call"
     target = _first_target(pairs, monsters)
     if target:
         fight, descr = target
@@ -150,6 +150,13 @@ def check_batch(pairs, obs):
             return "G4", f"rest or search {total} turns in one call (cap {REST_CAP})"
     if target and any(name in target[1] for name in ("gas spore", "floating eye")):
         return "G7", f"a move or F into a {target[1]}"
+    # G8: only a batch of turn keys. A command that takes prompt answers (a cast
+    # Zah, a throw tah, a quaff qa) is one action of several keys.
+    actions = sum(1 for _, c in pairs if c != ord("F"))  # F is a prefix: Fh is one attack
+    if actions > 1 and all(chr(c) in TURN_KEYS or chr(c).isdigit() for _, c in pairs):
+        for dy, dx, descr in monsters:
+            if max(abs(dy), abs(dx)) <= 1 and _hostile(descr):
+                return "G8", f"{actions} actions with a hostile ({descr or '?'}) adjacent: send one action per call"
     return None
 
 

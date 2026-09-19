@@ -363,6 +363,19 @@ class TestGates:
         assert self.gate("Fh", {(5, 4): "jackal"}) is None  # F plus a direction is one attack
         assert self.gate("FhFh", {(5, 4): "jackal"})[0] == "G8"
 
+    def test_g8_leaves_a_command_that_takes_prompt_answers(self):
+        """A cast, a throw, a fire or a quaff is one action of several keys."""
+        adjacent = {(5, 4): "jackal"}
+        for keys in ("Zah", "fh", "tah", "qa"):
+            assert self.gate(keys, adjacent) is None, keys
+        assert self.gate("hs", adjacent)[0] == "G8"
+
+    def test_g8_does_not_hide_the_rest_gates(self):
+        adjacent = {(5, 4): "jackal"}
+        assert self.gate("5s", adjacent)[0] == "G4"
+        hungry = status_obs(adjacent, "Hungry")
+        assert claude_play.check_batch(claude_play.parse_keys("5s"), hungry)[0] == "G5"
+
     def test_g3_fight_a_pet_or_walk_into_a_peaceful(self):
         assert self.gate("Fh", {(5, 4): "tame little dog"})[0] == "G3"
         assert self.gate("h", {(5, 4): "peaceful watchman"})[0] == "G3"
