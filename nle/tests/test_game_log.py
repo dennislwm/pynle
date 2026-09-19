@@ -344,6 +344,18 @@ class TestGates:
 
 
 class TestRealDaemon:
+    def test_monsters_reads_the_pet_from_a_real_observation(self, pipe_dir, tmp_path):
+        """REQ-011: _monsters indexes glyphs/screen_descriptions by blstats Y, X
+        correctly. A fresh game starts with the pet next to the hero."""
+        d = NLEDaemon(pipe_dir).start()
+        game_log.reset_game(d, "mon-hum-neu-mal", str(tmp_path))
+
+        found = claude_play._monsters(d.obs)
+
+        assert found, "no monster read: a silent skip or an off-by-one"
+        assert (0, 0) not in [(dy, dx) for dy, dx, _ in found]  # the hero's own cell
+        assert any(descr.startswith("tame ") and max(abs(dy), abs(dx)) <= 1 for dy, dx, descr in found)
+
     def test_a_resumed_game_appends_to_the_same_file(self, pipe_dir, tmp_path):
         """REQ-004 idempotency with a real save/resume: one game line, one
         session line per start, and a plain stop() begins a new game file."""
