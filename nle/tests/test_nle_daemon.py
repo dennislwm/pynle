@@ -159,3 +159,22 @@ class TestNLEDaemon:
         d2.reset()
         assert "glyphs" in d2.obs
         d2.stop()
+
+    def test_status_reconnect(self, pipe_dir):
+        """A fresh client can re-read the current observation without
+        advancing the episode; before any reset it gets an error, not a hang."""
+        d = NLEDaemon(pipe_dir).start()
+        with pytest.raises(RuntimeError):
+            d.status()
+        assert d.is_alive()
+
+        d.reset()
+        d.step(0)
+        glyphs, blstats = d.obs["glyphs"].copy(), d.obs["blstats"].copy()
+
+        d2 = NLEDaemon(pipe_dir)
+        for _ in range(2):  # twice: status must not advance a turn
+            d2.status()
+            assert (d2.obs["glyphs"] == glyphs).all()
+            assert (d2.obs["blstats"] == blstats).all()
+        d2.stop()

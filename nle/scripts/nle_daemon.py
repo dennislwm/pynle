@@ -192,11 +192,16 @@ class NLEDaemon:
     def reset(self, **kwargs):
         return self._update(self._send("reset", **kwargs))
 
+    def status(self):
+        """Re-reads the last observation without advancing the episode --
+        for a caller that lost its own handle and must not step/reset."""
+        return self._update(self._send("status"))
+
     def _send(self, cmd, action=None, timeout=30):
         """Sends one request and returns the daemon's one response.
 
         cmd is "step" (requires `action`, an int index into
-        `nle.nethack.ACTIONS`) or "reset". Raises RuntimeError if the
+        `nle.nethack.ACTIONS`), "reset" or "status". Raises RuntimeError if the
         daemon rejected the request (e.g. an out-of-range action) or
         TimeoutError if no response arrives within `timeout` seconds --
         the daemon stays alive and reusable in both cases.
@@ -246,6 +251,7 @@ def _run(pipe_dir, character, max_episode_steps):
     with open(pid_file, "w") as f:
         f.write(str(os.getpid()))
 
+    last_response = None  # replayed by "status"
     try:
         while True:
             msg = _read_framed(action_fifo)
@@ -262,7 +268,11 @@ def _run(pipe_dir, character, max_episode_steps):
                     _write_framed(obs_fifo, response)
                 break
             try:
-                if cmd == "reset":
+                if cmd == "status":
+                    if last_response is None:
+                        raise ValueError("no observation yet; call reset first")
+                    response = last_response
+                elif cmd == "reset":
                     obs, info = env.reset()
                     response = {"ok": True, "obs": obs, "reward": 0.0,
                                 "done": False, "truncated": False, "info": info}
@@ -279,6 +289,8 @@ def _run(pipe_dir, character, max_episode_steps):
                     response = {"ok": True, "obs": obs, "reward": reward,
                                 "done": done, "truncated": truncated,
                                 "info": info}
+                if cmd != "status":
+                    last_response = response
             except Exception as exc:  # keep the daemon and episode alive
                 response = {"ok": False, "error": str(exc)}
             _write_framed(obs_fifo, response)

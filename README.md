@@ -153,6 +153,7 @@ True
 >>> d.obs["glyphs"]
 ...
 >>> d.reset()
+>>> d.status()  # re-reads the last observation without advancing a turn
 >>> d.stop()  # blocks until the daemon has exited
 ```
 
