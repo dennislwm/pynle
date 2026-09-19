@@ -190,7 +190,8 @@ to resume.
 
 ### Recording a claude-play game
 
-See the pynle wiki's `decisions/adr-02-per-game-jsonl-record.md`.
+See the pynle wiki's `decisions/adr-02-per-game-jsonl-record.md`. Claude
+playing: see [CLAUDE.md](CLAUDE.md).
 
 Requires: [`make build`](#development-workflow) once, so `uv run` works.
 
@@ -208,10 +209,10 @@ per line:
    resumes into the same file. A plain `--stop` ends the game, and the next
    `--reset` opens a new file.
 
-Keys: `~` is ESC, `|` is Enter, `^x` is ctrl-x, `&x` is meta-x, a backtick is
-a literal caret. Pass them as one quoted argument, because a space is a key
-too. For a key the shell or `make` would eat (such as `"`), call
-`uv run python -m nle.scripts.claude_play '<keys>'` directly.
+Verbs and key syntax: `make play ARGS='--help'`. Pass keys as one quoted
+argument, because a space is a key too. For a key the shell or `make` would eat
+(such as `"`), call `uv run python -m nle.scripts.claude_play '<keys>'`
+directly.
 
 The file has four kinds of line: `game` (once, first), `session` (one per
 start or resume), `logs` (one per step) and `event` (`kind` is `death`,
