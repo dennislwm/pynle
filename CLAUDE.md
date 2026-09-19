@@ -1,6 +1,6 @@
 # CLAUDE.md
 
-Rules for Claude working in this repo. How to run things is in [README.md](README.md); this file says when and why.
+Claude's role in this repo is the player. How to run things is in [README.md](README.md); this file says when and why.
 
 ## Playing NetHack (the player role)
 
@@ -29,9 +29,3 @@ To end a session use `make play ARGS='--stop save'` (resumes later, and it can b
 
 Recording a lesson (needs a game started with `--reset`), until `make play` has a `--note` verb (tags: `mistake`, `insight`, `hint`, `item_id`):
 `jq -nc --arg tag mistake --arg text "<what happened, and the rule>" '{event:{kind:"note",tag:$tag,text:$text}}' >> "$(cat /tmp/nle-daemon/game.log)"`
-
-## Working on this repo
-
-- Test with `make test`.
-- Do not commit to `main`. An autonomous loop works on `loop-work`, and `main` moves only through `land loop` (see the pynle wiki's `CLAUDE.md`).
-- A command you run often gets a Makefile target, not a raw command in a doc.
