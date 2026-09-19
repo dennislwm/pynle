@@ -42,15 +42,15 @@ Rules games taught, from this repo's own games or the reference's. Mechanical ro
 | G7 | Combat | A move or `F` into a gas spore | Never melee it; keep away or attack from range | Mechanical | 001:7 |
 | S1 | Loot | A corpse you did not kill, on a square you are about to enter | Treat it as a trap square: skip it, or enter only at HP above 70 percent and not fleeing. A corpse you just killed is a loot event (S9) | Soft | 001:8, 002:296 |
 | S4 | Descent | Before `>`: HP at or below 70 percent, or a hunger or status warning | Rest or heal first, unless fleeing or using a trap door on purpose | Soft | 001:37 |
-| S5 | Combat | HP critical with a hostile adjacent | Disengage or engrave Elbereth first; `pray` does not cancel its next attack | Discipline | ref: Threat ladder, prayer death |
+| S5 | Combat | HP critical with a hostile adjacent | Disengage first; if retreat will not open distance (a monster as fast as you), engrave Elbereth (humans `@` and minotaurs ignore it). `pray` does not cancel its next attack: last resort | Discipline | ref: Threat ladder, prayer death |
 | S6 | Combat | A heavy hitter or stealer in view, not adjacent | Fire or throw first; leave by an open route if HP falls fast | Discipline | ref: Threat ladder, rothe and chameleon death |
-| S7 | Combat | A mold, lichen or acid blob adjacent | No melee by default; only when it is the sole way past and nothing ranged remains | Discipline | ref: Procedure 5, acid blob corridor |
+| S7 | Combat | A floating eye, mold, lichen or acid blob adjacent | Never melee a floating eye (paralysis), no exception. Mold or lichen: route around or shoot. Acid blob only: melee when it is the sole way past and nothing ranged remains | Discipline | ref: Procedure 5, acid blob corridor |
 | S8 | Combat | A hostile that S5 to S7 and G7 do not flag (never a peaceful) | Kill it: XP raises HP. Keep descending | Discipline | goal metrics; no incident |
-| S9 | Loot | A kill you made drops an item | Step on it and read "Things that are here" this turn | Discipline | ref: Procedure 6, mummy drop |
+| S9 | Loot | A kill you made leaves an item or a corpse | Step on it and read "Things that are here" this turn | Discipline | ref: Procedure 6, mummy drop |
 | S10 | Loot | An unidentified wand picked up, no hostile adjacent | Engrave-test it the same turn | Discipline | ref: Procedure 6, untested wand at death |
 | S11 | Loot | A chest or box | Loot it where it lies; force it only if locked | Discipline | ref: Procedure 6, encumbrance |
 | S12 | Loot | Weapon or armor found, while `CHARACTER` is a Monk | Fight bare-handed and wear no armor by default | Discipline | ref: guidebook lines 137 and 3078 (only these two checked) |
-| S13 | Loot | Pet-only food (tripe, egg) with a pet present | Throw it to the pet | Discipline | ref: Loot rows; no incident |
+| S13 | Loot | Pet-only food (tripe, egg) with a pet present | Throw it to the pet | Discipline | ref: Guidebook 6.2; no incident |
 | S14 | Navigation | About to search a dead end | Step onto its unrevealed neighbours first | Discipline | ref: Fastest way rung 6, 20 wasted searches |
 | S15 | Navigation | A branch seems to loop back | Walk it to its end before calling it a loop | Discipline | ref: Fastest way rung 6, missed stairs |
 | S16 | Navigation | A boulder blocks the route | Push from every angle, then a wand, a pick-axe, then drop everything | Discipline | ref: Fastest way rung 6; no incident |
@@ -59,10 +59,10 @@ Rules games taught, from this repo's own games or the reference's. Mechanical ro
 | S19 | Descent | No `>` on a fully explored level | Climb to the branch level and take the other `>` | Discipline | ref: No stairs down |
 | S20 | Loot | A peaceful `@` among stacked items (a shop) | Check it is peaceful, buy food only if low, read every price; one key per call (G2) | Discipline | ref: Entering a shop |
 | S21 | Loot | Unidentified items carried into a shop | Drop each, read the quote, pick it back up; judge retrieval against gold on hand | Discipline | ref: Entering a shop, own stock |
-| S22 | Loot | A high-value price-ID with no identify path | Sell or use it this visit; never sell worn gear or tools | Discipline | ref: Entering a shop, 12 logs with no identify or altar |
+| S22 | Loot | A high-value price-ID with no identify path | Sell it, or use it under controlled conditions (full HP, cleared room, nothing adjacent), this visit; never sell worn gear or tools | Discipline | ref: Entering a shop, 12 logs with no identify or altar |
 | S23 | Process | Ending a turn after ordinary progress | State the decision and go on; do not ask "keep going?" | Discipline | ref: Process row, confirmed 3 times |
 
-After a game ends (or you stop for good): for each `mistake` or `violation` note and the `death` event, ask whether an exit was in reach and whether an escape or defensive item went unused, then print one line `Gate-table check: Mechanical / Soft / Discipline / no row, generic / pynle-specific -- <reason>`. Where a lesson needs a new or edited row, save the draft row (Id, Trigger, Required action, Enforcement, Evidence) as a `hint` note. Only propose: the operator files the change.
+Every time a game ends or you run `--stop` (with or without `save`): for each `mistake` or `violation` note since the last check, and the `death` event, ask whether an exit was in reach and whether an escape or defensive item went unused, then print one line `Gate-table check: Mechanical / Soft / Discipline / no row, generic / pynle-specific -- <reason>`. Where a lesson needs a new or edited row, run `ponytail:ponytail-review` on the draft row (Id, Trigger, Required action, Enforcement, Evidence), apply its cuts, then save it as a `hint` note. Only propose: the operator files the change.
 
 Recording a lesson (needs a game started with `--reset`), until `make play` has a `--note` verb (tags: `mistake`, `insight`, `hint`, `item_id`, `goal`):
 `jq -nc --arg tag mistake --arg text "<what happened, and the rule>" '{event:{kind:"note",tag:$tag,text:$text}}' >> "$(cat /tmp/nle-daemon/game.log)"`
