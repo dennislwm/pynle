@@ -11,9 +11,14 @@ game_state/ (see nle/scripts/game_log.py and ADR-02).
 Key syntax: ~ is ESC, | is Enter, ^x is ctrl-x, &x is meta-x (&l is #loot),
 a backtick is a literal caret, anything else is sent as typed. A batch stops
 early on HP loss, --More--, a [yn] prompt or a hunger warning; each early stop
-is recorded as a note tagged "violation".
+is recorded as a note tagged "violation". Before any key is sent, a batch is
+refused (and recorded the same way) by gate G2 (more than one key with a peaceful
+within 2 squares), G4 (rest or search with a hostile in view, or more than 10
+turns) or G7 (a move or F into a gas spore).
 """
 import sys
+
+import numpy as np
 
 from nle import nethack
 from nle.scripts import game_log
@@ -22,6 +27,11 @@ from nle.scripts.nle_daemon import NLEDaemon
 PIPE_DIR = "/tmp/nle-daemon"
 CHARACTER = "mon-hum-neu-mal"
 HUNGER = ("Hungry", "Weak", "Fainting")
+REST_CAP = 10  # turns of rest or search per call (ADR-03 open point 1)
+DIRECTIONS = {  # (dy, dx)
+    "h": (0, -1), "j": (1, 0), "k": (-1, 0), "l": (0, 1),
+    "y": (-1, -1), "u": (-1, 1), "b": (1, -1), "n": (1, 1),
+}
 # step() takes an index into nethack.ACTIONS, not a key code.
 ACTION_INDEX = {int(a): i for i, a in enumerate(nethack.ACTIONS)}
 
@@ -64,6 +74,55 @@ def stop_reason(daemon, hp0):
     return None
 
 
+def _monsters(obs):
+    """(dy, dx, description) of every monster cell except the hero's own, dy and
+    dx relative to the hero. Empty if the observation has no descriptions."""
+    if "screen_descriptions" not in obs:
+        return []
+    hy = int(obs["blstats"][nethack.NLE_BL_Y])
+    hx = int(obs["blstats"][nethack.NLE_BL_X])
+    found = []
+    for y, x in zip(*np.nonzero(nethack.glyph_is_monster(obs["glyphs"]))):
+        if (y, x) != (hy, hx):
+            descr = bytes(obs["screen_descriptions"][y][x]).split(b"\0")[0].decode("ascii", "replace")
+            found.append((int(y) - hy, int(x) - hx, descr))
+    return found
+
+
+def check_batch(pairs, obs):
+    """A gate id and message if the batch must not be sent (ADR-03), else None.
+    Reads monster hostility from description prefixes, so it can miss while
+    hallucinating. G7 only looks at the batch's first move: later keys land
+    on squares that depend on the earlier ones."""
+    monsters = _monsters(obs)
+    if len(pairs) > 1:
+        for dy, dx, descr in monsters:
+            if max(abs(dy), abs(dx)) <= 2 and descr.startswith("peaceful "):
+                return "G2", f"{len(pairs)} keys with a peaceful ({descr}) within 2 squares: send one key per call"
+    total, digits = 0, ""
+    for _, code in pairs:
+        if chr(code).isdigit():
+            digits += chr(code)
+        else:
+            if chr(code) in "s.":
+                total += int(digits or 1)
+            digits = ""
+    if total:
+        if any(not d.startswith(("tame ", "peaceful ")) for _, _, d in monsters):
+            return "G4", "rest or search with a hostile monster in view"
+        if total > REST_CAP:
+            return "G4", f"rest or search {total} turns in one call (cap {REST_CAP})"
+    moves = [c for _, c in pairs[:2]]
+    if moves and moves[0] == ord("F") and len(moves) > 1:
+        moves = moves[1:]
+    if moves and chr(moves[0]) in DIRECTIONS:
+        dy, dx = DIRECTIONS[chr(moves[0])]
+        for my, mx, descr in monsters:
+            if (my, mx) == (dy, dx) and "gas spore" in descr:
+                return "G7", "a move or F into a gas spore (it explodes)"
+    return None
+
+
 def run_keys(daemon, keys, action_index=ACTION_INDEX, state_dir=game_log.STATE_DIR):
     """Sends the keys one step at a time, recording each step, and stops at the
     first reason to. Returns that reason, or None if every key was sent."""
@@ -71,6 +130,14 @@ def run_keys(daemon, keys, action_index=ACTION_INDEX, state_dir=game_log.STATE_D
     for typed, code in pairs:
         if code not in action_index:
             raise SystemExit(f"key {typed!r} (code {code}) is not in nethack.ACTIONS")
+    refusal = check_batch(pairs, daemon.obs)
+    if refusal:
+        gate, message = refusal
+        game_log.note(
+            daemon, f"refused {gate}: {message}", tag="violation", state_dir=state_dir, gate=gate, unsent=keys
+        )
+        print(f"REFUSED {gate}: {message}. Nothing was sent.")
+        return gate
     hp0 = int(daemon.obs["blstats"][nethack.NLE_BL_HP])
     for i, (typed, code) in enumerate(pairs):
         prev_obs = daemon.obs

@@ -288,6 +288,61 @@ class TestClaudePlay:
         assert keys_of(path) == ["game", "session", "logs", "logs"]
 
 
+def gate_obs(monsters, hero=(5, 5)):
+    """An observation with the hero at (y, x) and {(y, x): description} monsters."""
+    obs = make_obs()
+    obs["blstats"][nethack.NLE_BL_Y], obs["blstats"][nethack.NLE_BL_X] = hero
+    obs["glyphs"] = np.full((21, 79), 2359, dtype=np.int32)  # a non-monster glyph
+    obs["screen_descriptions"] = np.zeros((21, 79, 80), dtype=np.uint8)
+    for (y, x), text in {hero: "human monk called Agent", **monsters}.items():
+        obs["glyphs"][y, x] = nethack.GLYPH_MON_OFF
+        obs["screen_descriptions"][y, x, : len(text)] = list(text.encode())
+    return obs
+
+
+class TestGates:
+    def gate(self, keys, monsters):
+        return claude_play.check_batch(claude_play.parse_keys(keys), gate_obs(monsters))
+
+    def test_g2_batch_next_to_a_peaceful(self):
+        assert self.gate("sy", {(5, 7): "peaceful watchman"})[0] == "G2"
+
+    def test_g2_allows_one_key_a_far_peaceful_and_a_pet(self):
+        assert self.gate("s", {(5, 6): "peaceful watchman"}) is None
+        assert self.gate("hh", {(5, 8): "peaceful watchman"}) is None
+        assert self.gate("hh", {(5, 6): "tame little dog"}) is None
+
+    def test_g4_rest_with_a_hostile_in_view(self):
+        assert self.gate("5s", {(1, 1): "jackal"})[0] == "G4"
+        assert self.gate("s", {(1, 1): "peaceful watchman"}) is None
+
+    def test_g4_reads_the_count_prefix_and_caps_the_total(self):
+        assert self.gate("300s", {})[0] == "G4"
+        assert self.gate("6s6.", {})[0] == "G4"
+        assert self.gate("10s", {}) is None
+        assert self.gate("2h20", {}) is None  # digits not followed by s or .
+
+    def test_g7_move_or_fight_into_a_gas_spore(self):
+        assert self.gate("l", {(5, 6): "gas spore"})[0] == "G7"
+        assert self.gate("Fl", {(5, 6): "gas spore"})[0] == "G7"
+        assert self.gate("h", {(5, 6): "gas spore"}) is None
+
+    def test_own_cell_is_never_a_monster(self):
+        assert self.gate("hh", {}) is None  # the hero cell has a monster glyph and no prefix
+
+    def test_refusal_sends_nothing_and_logs_a_violation(self, dirs):
+        pipe_dir, state_dir = dirs
+        d = FakeDaemon(pipe_dir)
+        path = game_log.reset_game(d, None, state_dir)
+        d.obs = gate_obs({(5, 6): "peaceful watchman"})
+
+        assert claude_play.run_keys(d, "sy", {ord("s"): 0, ord("y"): 1}, state_dir) == "G2"
+
+        assert keys_of(path) == ["game", "session", "event"]  # no step was taken or logged
+        note = lines(path)[-1]["event"]
+        assert note["tag"] == "violation" and note["gate"] == "G2" and note["unsent"] == "sy"
+
+
 class TestRealDaemon:
     def test_a_resumed_game_appends_to_the_same_file(self, pipe_dir, tmp_path):
         """REQ-004 idempotency with a real save/resume: one game line, one

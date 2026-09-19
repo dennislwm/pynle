@@ -31,5 +31,19 @@ Constraints:
 
 To end a session use `make play ARGS='--stop save'` (resumes later, and it can be repeated) or a plain `--stop` (ends the game).
 
+## Lessons (gate table)
+
+Rules your own games taught. Mechanical rows are enforced by the driver: it refuses the batch before any key is sent, prints `REFUSED <id>`, and records a `violation` note carrying the gate id. Soft and Discipline rows depend on you. Evidence is `game_state/001_nle_daemon.jsonl` (001) or `game_state/002_nle_daemon.jsonl` (002), then the line number.
+
+| Id | Trigger | Required action | Enforcement | Evidence |
+|---|---|---|---|---|
+| G2 | More than one key in a call while a peaceful is within 2 squares | One key per call; never batch near a prompt (`y` answers yes) | Mechanical | 001:10, 001:6 |
+| G4 | Rest or search (`s`, `.`, count prefix read) with a hostile in view, or more than 10 turns in one call | Deal with the monster first; rest in calls of 10 or fewer, watching HP | Mechanical | 001:5, 001:33, 002:918 |
+| G7 | A move or `F` into a gas spore | Never melee it; keep away or attack from range | Mechanical | 001:7 |
+| S1 | A corpse lying with items on the square you are about to enter | Do not step on it: it is a trap victim (the driver cannot see the items) | Soft | 001:8, 002:296 |
+| S4 | Before `>`: HP at or below 70 percent, or a hunger or status warning | Rest or heal first, unless fleeing or using a trap door on purpose | Soft | 001:37 |
+
+After a game ends (or you stop for good): for each `mistake` or `violation` note and the `death` event, print one line `Gate-table check: Mechanical / Soft / Discipline / no row, generic / pynle-specific -- <reason>`. Where a lesson needs a new or edited row, save the draft row (Id, Trigger, Required action, Enforcement, Evidence) as a `hint` note. Only propose: the operator files the change.
+
 Recording a lesson (needs a game started with `--reset`), until `make play` has a `--note` verb (tags: `mistake`, `insight`, `hint`, `item_id`, `goal`):
 `jq -nc --arg tag mistake --arg text "<what happened, and the rule>" '{event:{kind:"note",tag:$tag,text:$text}}' >> "$(cat /tmp/nle-daemon/game.log)"`
