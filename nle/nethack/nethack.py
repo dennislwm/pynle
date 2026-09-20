@@ -304,8 +304,10 @@ class Nethack:
         self._tempdir = None
 
     def save(self):
-        """Writes a native NetHack save file for the current episode
-        without stopping it. A later Nethack instance constructed with
+        """Writes a native NetHack save file for the current episode.
+        The episode cannot continue after this: dosave0() frees the game
+        state, so a later step() can crash. Close it, or reset() for a
+        fresh episode. A later Nethack instance constructed with
         the same vardir resumes it automatically -- NetHack's own
         startup (unixmain.c) checks for and loads a matching save file
         before character creation, no separate "resume" call needed."""

@@ -485,8 +485,11 @@ class NLE(gym.Env):
         super().close()
 
     def save(self):
-        """Writes a native NetHack save file for the current episode,
-        without stopping it. Requires this NLE to have been constructed
+        """Writes a native NetHack save file for the current episode.
+        The episode cannot continue after this: dosave0() frees the game
+        state, so a later step() can crash. Close the env, or resume from
+        a new NLE with the same vardir (reset() also starts a fresh
+        episode). Requires this NLE to have been constructed
         with a `vardir` -- the default (an ephemeral, auto-deleted
         vardir) makes a save unrecoverable, since nothing else
         will know where it went.
