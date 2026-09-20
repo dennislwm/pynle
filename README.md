@@ -249,6 +249,15 @@ Guard every comparison with `has("logs")`: in `jq` a missing key sorts below
 any number, so `select(.logs.hp < 10)` also matches the `game` line. After a
 hard kill the last line can be cut off; `jq -cR 'fromjson? | ...'` skips it.
 
+To watch a game live, open `game_state/game_view.html` in a browser. It reloads
+every 2 seconds.
+
+- The driver rewrites that one file after each call.
+- It shows the latest screen only.
+- It is built in a temp file beside it and renamed over it, so a reload never
+  sees a half-written page.
+- A write failure never changes what the player sees.
+
 Additionally, a [TorchBeast](https://github.com/facebookresearch/torchbeast)
 agent is bundled in `nle.agent` together with a simple model to provide a
 starting point for experiments:

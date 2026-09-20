@@ -28,6 +28,7 @@ def make_obs(t=1, depth=1, hp=13, top="", misc=(0, 0, 0), exp=0, score=0, dnum=0
     return {
         "blstats": blstats,
         "tty_chars": tty,
+        "tty_colors": np.zeros((24, 80), dtype=np.int8),
         "tty_cursor": np.array([0, 0]),
         "misc": np.array(misc),
     }
@@ -67,6 +68,12 @@ def lines(path):
 
 def keys_of(path):
     return [next(iter(record)) for record in lines(path)]
+
+
+@pytest.fixture(autouse=True)
+def view_in_tmp(tmp_path, monkeypatch):
+    """Keep tests from writing the real game_state/game_view.html."""
+    monkeypatch.setattr(claude_play, "VIEW_PATH", str(tmp_path / "game_view.html"))
 
 
 @pytest.fixture
@@ -296,6 +303,42 @@ class TestClaudePlay:
 
         assert claude_play.run_keys(d, "hj", {ord("h"): 0, ord("j"): 1}, state_dir) is None
         assert keys_of(path) == ["game", "session", "logs", "logs"]
+
+
+class TestWriteView:
+    def test_colors_and_escapes(self, tmp_path):
+        obs = make_obs(top="a<b")
+        obs["tty_colors"][0, 0] = 1  # red
+        path = str(tmp_path / "v.html")
+        game_log.write_view(obs, path)
+        page = open(path).read()
+        assert '<span style="color:#cd0000">a</span>' in page
+        assert "&lt;" in page
+
+    def test_a_second_write_replaces_the_page(self, tmp_path):
+        path = str(tmp_path / "v.html")
+        game_log.write_view(make_obs(top="first"), path)
+        game_log.write_view(make_obs(top="second"), path)
+        page = open(path).read()
+        assert "second" in page and "first" not in page and page.count("<pre>") == 1
+
+    def test_a_failed_rename_leaves_no_temp_file(self, tmp_path, monkeypatch):
+        def boom(*args):
+            raise OSError("rename failed")
+
+        monkeypatch.setattr(os, "replace", boom)
+        game_log.write_view(make_obs(), str(tmp_path / "v.html"))
+        assert os.listdir(tmp_path) == []
+
+    def test_a_failed_write_leaves_the_player_output_unchanged(self, tmp_path, capsys, monkeypatch):
+        d = FakeDaemon(str(tmp_path))
+        monkeypatch.setattr(claude_play, "VIEW_PATH", str(tmp_path / "no" / "such" / "v.html"))
+        claude_play.print_screen(d)
+        with_failure = capsys.readouterr().out
+        monkeypatch.setattr(claude_play, "VIEW_PATH", str(tmp_path / "v.html"))
+        claude_play.print_screen(d)
+        assert capsys.readouterr().out == with_failure
+        assert os.path.exists(tmp_path / "v.html")
 
 
 def gate_obs(monsters, hero=(5, 5)):

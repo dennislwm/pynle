@@ -20,6 +20,7 @@ floating eye) or G8 (more than one action with a hostile adjacent; F and its
 direction count as one). G4 and G5 apply only to a batch of digits, s and . ;
 G8 only to a batch of moves, F, s, . and digits, so a cast, throw or quaff is fine.
 """
+import os
 import sys
 
 import numpy as np
@@ -29,6 +30,7 @@ from nle.scripts import game_log
 from nle.scripts.nle_daemon import NLEDaemon
 
 PIPE_DIR = "/tmp/nle-daemon"
+VIEW_PATH = os.path.join(game_log.STATE_DIR, "game_view.html")
 CHARACTER = "mon-hum-neu-mal"
 HUNGER = ("Hungry", "Weak", "Fainting")
 REST_CAP = 10  # turns of rest or search per call (ADR-03 open point 1)
@@ -203,6 +205,7 @@ def print_screen(daemon):
     for row in game_log.screen(obs).split("\n"):
         if row:
             print(row)
+    game_log.write_view(obs, VIEW_PATH)
 
 
 def main(argv):

@@ -11,9 +11,13 @@ moving the writer into the daemon later only moves the call sites.
 
 See 13pynle.wiki/decisions/adr-02-per-game-jsonl-record.md (Option 2).
 """
+import contextlib
+import html
+import itertools
 import json
 import os
 import re
+import tempfile
 
 from nle import nethack
 
@@ -53,6 +57,46 @@ def screen(obs):
     return "\n".join(
         bytes(row).decode("ascii", "replace").rstrip() for row in obs["tty_chars"]
     )
+
+
+# tty_colors holds 0-15 (bit 8 = bright); hex values are the xterm 16 colors.
+# ponytail: index 0 (black) is drawn gray, it would vanish on the #111 page.
+PALETTE = [
+    "#7f7f7f", "#cd0000", "#00cd00", "#cdcd00", "#0000ee", "#cd00cd", "#00cdcd", "#e5e5e5",
+    "#7f7f7f", "#ff0000", "#00ff00", "#ffff00", "#5c5cff", "#ff00ff", "#00ffff", "#ffffff",
+]
+VIEW_HEAD = (
+    '<!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="2">'
+    "<title>NetHack</title><style>body{background:#111;margin:0;padding:12px}"
+    'pre{color:#ddd;font:14px/1.2 "IBM Plex Mono",ui-monospace,monospace;margin:0}</style><pre>'
+)
+
+
+def write_view(obs, path):
+    """Latest screen as colored HTML, for the analyst to watch in a browser tab.
+    Builds the page in a temp file beside `path`, then renames it over `path`
+    (same directory, so always atomic): a page reload never sees a torn file.
+    Never raises and never prints: it must not change what the player sees."""
+    tmp = None
+    try:
+        rows = [
+            "".join(
+                f'<span style="color:{PALETTE[c]}">'
+                f'{html.escape("".join(chr(ch) for ch, _ in run))}</span>'
+                for c, run in itertools.groupby(zip(chars, colors), key=lambda p: int(p[1]))
+            )
+            for chars, colors in zip(obs["tty_chars"], obs["tty_colors"])
+        ]
+        with tempfile.NamedTemporaryFile(
+            "w", dir=os.path.dirname(path), suffix=".tmp", delete=False
+        ) as f:
+            tmp = f.name
+            f.write(VIEW_HEAD + "\n".join(rows) + "</pre>\n")
+        os.replace(tmp, path)
+    except Exception:
+        if tmp:  # a failed rename must not leave a temp file on every call
+            with contextlib.suppress(OSError):
+                os.remove(tmp)
 
 
 def append(path, key, payload):
