@@ -156,6 +156,27 @@ def _session(daemon, path, resumed, pointer_lost=False):
     append(path, "session", session)
 
 
+def _abandoned(path, state_dir):
+    """The name of the game file before `path` if it never recorded a death
+    event (discarded, killed or lost), else None. No earlier file: None."""
+    number = int(_GAME_FILE.match(os.path.basename(path)).group(1))
+    earlier = [
+        f for f in os.listdir(state_dir)
+        if (m := _GAME_FILE.match(f)) and int(m.group(1)) < number
+    ]
+    if not earlier:
+        return None
+    previous = max(earlier, key=lambda f: int(_GAME_FILE.match(f).group(1)))
+    with open(os.path.join(state_dir, previous)) as f:
+        for line in f:
+            try:
+                if json.loads(line).get("event", {}).get("kind") == "death":
+                    return None
+            except ValueError:  # a line torn by a hard kill
+                continue
+    return previous[: -len(".jsonl")]
+
+
 def reset_game(daemon, character=None, state_dir=STATE_DIR):
     """daemon.reset() plus the record. A save that was in the save directory
     before the reset and is gone after it was consumed by a successful
@@ -170,6 +191,11 @@ def reset_game(daemon, character=None, state_dir=STATE_DIR):
     if path is None:
         path = _new_game(daemon, state_dir, character, fresh=not resumed)
     _session(daemon, path, resumed, pointer_lost)
+    if not resumed and (previous := _abandoned(path, state_dir)):
+        note(
+            daemon, f"game {previous} ended without a death event: discarded, killed or lost",
+            tag="violation", state_dir=state_dir, gate="G12", previous=previous,
+        )
     return path
 
 

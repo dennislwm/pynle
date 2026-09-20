@@ -220,6 +220,14 @@ per line:
    - G7: a move or `F` into a gas spore or a floating eye.
    - G8: more than one action with a hostile adjacent (`F` and its direction
      count as one).
+   - G9: `--reset` while a game is running, whatever its turn. It refuses
+     `--reset`, not a batch, and prints `Nothing was reset`.
+   - G10: any batch with `&q` (quit): it ends the game without a save, and the
+     record would show a death.
+
+   Two more `violation` notes need no refusal. G11: `--stop discard` on a
+   running game. G12: a fresh game opened after a game file that never
+   recorded a death (discarded, killed or lost); the note names that game.
 
    G4 and G5 apply only to a batch of digits, `s` and `.`, so `_<.` (travel)
    is never a rest. G8 applies only to a batch of moves, `F`, `s`, `.` and

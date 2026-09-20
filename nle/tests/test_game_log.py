@@ -156,7 +156,7 @@ class TestResetGame:
         second = game_log.reset_game(stuck, None, state_dir)
 
         assert second != first
-        assert lines(second)[-1]["session"]["resumed"] is False
+        assert [r for r in lines(second) if "session" in r][-1]["session"]["resumed"] is False
         assert game_log.current_game(pipe_dir) == second
 
     def test_resume_with_no_pointer_starts_a_new_file(self, dirs):
@@ -173,6 +173,33 @@ class TestResetGame:
         with open(os.path.join(pipe_dir, game_log.POINTER), "w") as f:
             f.write(os.path.join(state_dir, "999_gone.jsonl") + "\n")
         assert game_log.current_game(pipe_dir) is None
+
+
+class TestAbandonedGame:
+    """REQ-018: a fresh game while the previous one never ended in death."""
+
+    def test_a_fresh_game_after_an_unfinished_one_writes_a_violation_note(self, dirs):
+        pipe_dir, state_dir = dirs
+        first = game_log.reset_game(FakeDaemon(pipe_dir), None, state_dir)
+        second = game_log.reset_game(FakeDaemon(pipe_dir), None, state_dir)
+
+        note = lines(second)[-1]["event"]
+        assert note["kind"] == "note" and note["tag"] == "violation" and note["gate"] == "G12"
+        assert note["previous"] == os.path.basename(first)[: -len(".jsonl")]
+
+    def test_no_note_after_a_game_that_ended_in_death(self, dirs):
+        pipe_dir, state_dir = dirs
+        first = game_log.reset_game(FakeDaemon(pipe_dir), None, state_dir)
+        game_log.append(first, "event", {"kind": "death", "t": 9, "dlvl": 1})
+        second = game_log.reset_game(FakeDaemon(pipe_dir), None, state_dir)
+        assert keys_of(second) == ["game", "session"]
+
+    def test_a_resume_is_not_an_abandoned_game(self, dirs):
+        pipe_dir, state_dir = dirs
+        path = game_log.reset_game(FakeDaemon(pipe_dir), None, state_dir)
+        resumed = FakeDaemon(pipe_dir, save_before=True, consumes_save=True)
+        assert game_log.reset_game(resumed, None, state_dir) == path
+        assert keys_of(path) == ["game", "session", "session"]
 
 
 class TestLogStep:
@@ -373,6 +400,13 @@ class TestGates:
         assert self.gate("hh", {(5, 8): "peaceful watchman"}) is None
         assert self.gate("hh", {(5, 6): "tame little dog"}) is None
 
+    def test_g10_refuses_a_quit(self):
+        """&q is meta-q: NetHack's quit, which ends the game and is recorded as a death."""
+        assert self.gate("&q", {})[0] == "G10"
+        assert self.gate("h&q", {})[0] == "G10"
+        assert self.gate("q", {}) is None  # quaff
+        assert self.gate("&l", {}) is None  # #loot
+
     def test_g4_rest_with_a_hostile_in_view(self):
         assert self.gate("5s", {(1, 1): "jackal"})[0] == "G4"
         assert self.gate("s", {(1, 1): "peaceful watchman"}) is None
@@ -544,3 +578,59 @@ class TestRealDaemon:
 
         assert "not saved" in capsys.readouterr().out
         assert not d.is_alive() and not d.has_save()
+
+    def test_g9_refuses_a_reset_over_a_running_game(self, pipe_dir, tmp_path, monkeypatch, capsys):
+        """REQ-018: --reset would abandon a running game."""
+        monkeypatch.setattr(claude_play, "PIPE_DIR", pipe_dir)
+        notes = []
+        monkeypatch.setattr(game_log, "note", lambda daemon, text, **kw: notes.append((text, kw)))
+        d = NLEDaemon(pipe_dir).start()
+        game_log.reset_game(d, "mon-hum-neu-mal", str(tmp_path))
+        for _ in range(3):
+            d.step(claude_play.ACTION_INDEX[ord("s")])
+        turn = int(d.obs["blstats"][nethack.NLE_BL_TIME])
+
+        claude_play.main(["--reset"])
+
+        assert "REFUSED G9" in capsys.readouterr().out
+        assert notes and notes[0][1]["tag"] == "violation" and notes[0][1]["gate"] == "G9"
+        d.status()
+        assert int(d.obs["blstats"][nethack.NLE_BL_TIME]) == turn  # the game was not reset
+
+    def test_g9_refuses_only_a_running_game(self, pipe_dir, tmp_path):
+        d = NLEDaemon(pipe_dir)
+        assert claude_play.reset_refusal(d) is None  # no daemon
+        d.start()
+        assert claude_play.reset_refusal(d) is None  # started, never reset
+        game_log.reset_game(d, "mon-hum-neu-mal", str(tmp_path))
+        assert claude_play.reset_refusal(d)[0] == "G9"  # a fresh game at turn 1 is refused too
+
+    def test_g9_lets_a_reset_through_after_the_game_is_over(self, pipe_dir):
+        d = NLEDaemon(pipe_dir).start(max_episode_steps=3)
+        d.reset()
+        while not d.done:
+            d.step(claude_play.ACTION_INDEX[ord("s")])
+        assert claude_play.reset_refusal(d) is None
+
+    def test_g11_logs_a_discard_of_a_running_game(self, pipe_dir, tmp_path, monkeypatch):
+        monkeypatch.setattr(claude_play, "PIPE_DIR", pipe_dir)
+        notes = []
+        monkeypatch.setattr(game_log, "note", lambda daemon, text, **kw: notes.append(kw))
+        d = NLEDaemon(pipe_dir).start()
+        game_log.reset_game(d, "mon-hum-neu-mal", str(tmp_path))
+
+        claude_play.main(["--stop", "discard"])
+
+        assert [n["gate"] for n in notes] == ["G11"] and notes[0]["tag"] == "violation"
+        assert not d.is_alive() and not d.has_save()
+
+    def test_g11_is_silent_for_a_plain_stop_and_for_no_game(self, pipe_dir, tmp_path, monkeypatch):
+        monkeypatch.setattr(claude_play, "PIPE_DIR", pipe_dir)
+        notes = []
+        monkeypatch.setattr(game_log, "note", lambda daemon, text, **kw: notes.append(kw))
+        d = NLEDaemon(pipe_dir).start()
+        claude_play.main(["--stop", "discard"])  # never reset: no game to discard
+        d = NLEDaemon(pipe_dir).start()
+        game_log.reset_game(d, "mon-hum-neu-mal", str(tmp_path))
+        claude_play.main(["--stop"])  # saves
+        assert notes == []

@@ -25,11 +25,11 @@ On every call:
 
 Constraints:
 
-- `--reset` on a running game abandons it and opens a new game file. To keep a game, `--stop` first.
+- `--reset` is refused (G9) while a game is running, whatever its turn. A game ends by death or by the operator. To leave a game, `--stop`: the next `--reset` resumes it.
 - Run one `make play` call at a time: the pipes have one reader and one writer and no lock.
 - `game_state/*.jsonl` is append-only. Never edit or delete a line or a file.
 
-To end a session use `make play ARGS='--stop'`. It saves, resumes later, and can be repeated. Never use `--stop discard`: it ends the game with no save, and only the operator may run it.
+To end a session use `make play ARGS='--stop'`. It saves, resumes later, and can be repeated. Never use `--stop discard`: it ends the game with no save, and only the operator may run it. The driver logs it as a violation.
 
 ## Lessons (gate table)
 
@@ -43,6 +43,8 @@ Rules games taught, from this repo's own games or the reference's. Mechanical ro
 | G5 | Combat | A rest or search call while the status line shows Hungry, Weak or Fainting | Eat first | Mechanical | 001:5 |
 | G7 | Combat | A move or `F` into a gas spore or a floating eye | Never melee it; keep away or attack from range | Mechanical | 001:7, ref: Procedure 5 |
 | G8 | Combat | A call of only moves, `F`, `s`, `.` and digits with more than one action while a hostile is adjacent (`F` and its direction count as one; a cast, throw or quaff is not refused) | One action per call, checking HP between them | Mechanical | ref: Threat ladder rung 3, jackal death |
+| G9 | Process | `--reset` while a game is running, whatever its turn | Never abandon a game: `--stop` saves it, and the next `--reset` resumes it | Mechanical | 003 and 004: one daemon (pid 11413), 003 replaced by 004; neither has a `death` event |
+| G10 | Process | A batch with `&q` (meta-q, quit) | Never quit: it ends the game with no save and the record shows a death | Mechanical | probe: `&q` then `y` gives `done` with end_status 1; no game incident, an operator decision |
 | S1 | Loot | A corpse you did not kill, on a square you are about to enter | Treat it as a trap square: skip it, or enter only at HP above 70 percent and not fleeing. A corpse you just killed is a loot event (S9) | Soft | 001:8, 002:296 |
 | S4 | Descent | Before `>`: HP at or below 70 percent, or a hunger or status warning | Rest or heal first, unless fleeing or using a trap door on purpose. Rest only on the upstairs or in a dead end | Soft | 001:37, 002:918 |
 | S5 | Combat | A hostile adjacent and HP at or below twice its largest hit | Disengage first; if retreat will not open distance (a monster as fast as you), engrave Elbereth (humans `@` and minotaurs ignore it). `pray` does not cancel its next attack: last resort | Discipline | ref: Threat ladder, prayer death; 002:1939 |

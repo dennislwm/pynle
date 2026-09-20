@@ -19,6 +19,9 @@ or search while Hungry, Weak or Fainting), G7 (a move or F into a gas spore or a
 floating eye) or G8 (more than one action with a hostile adjacent; F and its
 direction count as one). G4 and G5 apply only to a batch of digits, s and . ;
 G8 only to a batch of moves, F, s, . and digits, so a cast, throw or quaff is fine.
+--reset is refused (G9) while a game is running, and a batch with &q (quit) is refused (G10).
+A violation note is written for --stop discard on a running game (G11) and for a fresh game
+opened after a game that never ended in death (G12).
 """
 import os
 import sys
@@ -123,6 +126,8 @@ def check_batch(pairs, obs):
     command (hZal) is not refused. The driver keeps no state between calls, so
     a lone . that confirms a prompt opened by an earlier call still counts as
     a rest."""
+    if any(code == ord("q") | 0x80 for _, code in pairs):
+        return "G10", "&q quits the game without saving, and the record shows a death: a game ends by death or by the operator"
     monsters = _monsters(obs)
     if len(pairs) > 1:
         for dy, dx, descr in monsters:
@@ -160,6 +165,30 @@ def check_batch(pairs, obs):
             if max(abs(dy), abs(dx)) <= 1 and _hostile(descr):
                 return "G8", f"{actions} actions with a hostile ({descr or '?'}) adjacent: send one action per call"
     return None
+
+
+def _running_turn(daemon):
+    """The turn of the game this daemon is running, or None if it is stopped,
+    was never reset (status() raises), or the game is over."""
+    if not daemon.is_alive():
+        return None
+    try:
+        daemon.status()
+    except RuntimeError:
+        return None
+    if daemon.done:
+        return None
+    return int(daemon.obs["blstats"][nethack.NLE_BL_TIME])
+
+
+def reset_refusal(daemon):
+    """G9: a gate id and message if --reset would abandon a running game, else
+    None. The turn does not matter: any running game is left by --stop, never by
+    --reset."""
+    turn = _running_turn(daemon)
+    if turn is None:
+        return None
+    return "G9", f"a game is running (turn {turn}) and --reset would abandon it: --stop saves it, and the next --reset resumes it"
 
 
 def run_keys(daemon, keys, action_index=ACTION_INDEX, state_dir=game_log.STATE_DIR):
@@ -218,6 +247,8 @@ def main(argv):
             daemon.start(character=CHARACTER)
             print("daemon started")
         elif verb == "--stop":
+            if "discard" in rest and _running_turn(daemon) is not None:
+                game_log.note(daemon, "discarded a running game with --stop discard", tag="violation", gate="G11")
             try:
                 daemon.stop(save="discard" not in rest)  # a lost game must be on purpose
             except RuntimeError as exc:  # stopped anyway: no reset yet, or the game is over
@@ -225,8 +256,14 @@ def main(argv):
             else:
                 print("daemon stopped" + (", game saved" if daemon.has_save() else ""))
         elif verb == "--reset":
-            print("game file:", game_log.reset_game(daemon, CHARACTER))
-            print_screen(daemon)
+            refusal = reset_refusal(daemon)
+            if refusal:
+                gate, message = refusal
+                game_log.note(daemon, f"refused {gate}: {message}", tag="violation", gate=gate)
+                print(f"REFUSED {gate}: {message}. Nothing was reset.")
+            else:
+                print("game file:", game_log.reset_game(daemon, CHARACTER))
+                print_screen(daemon)
         elif verb == "--help":
             print(__doc__)
         else:
