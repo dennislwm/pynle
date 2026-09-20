@@ -225,9 +225,10 @@ per line:
    is never a rest. G8 applies only to a batch of moves, `F`, `s`, `.` and
    digits, so a cast, throw or quaff (which takes prompt answers) is not
    refused. The `violation` note carries a `gate` field and the `unsent` keys.
-4. `make play ARGS='--stop save'` saves and stops. `--start` then `--reset`
-   resumes into the same file. A plain `--stop` ends the game, and the next
-   `--reset` opens a new file.
+4. `make play ARGS='--stop'` saves and stops. `--start` then `--reset`
+   resumes into the same file. `--stop discard` ends the game without a save,
+   and the next `--reset` opens a new file. A finished game, or one never
+   reset, cannot be saved: the stop still happens and prints "not saved".
 
 Verbs and key syntax: `make play ARGS='--help'`. Pass keys as one quoted
 argument, because a space is a key too. For a key the shell or `make` would eat

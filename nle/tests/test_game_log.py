@@ -497,3 +497,50 @@ class TestRealDaemon:
         second = game_log.reset_game(d3, "mon-hum-neu-mal", state_dir)
         assert second != path
         assert os.path.basename(second)[:3] == "002"
+
+    def test_a_plain_stop_saves_and_the_game_resumes(self, pipe_dir, tmp_path, monkeypatch, capsys):
+        """REQ-017: --stop with no word saves; the next start resumes the same file."""
+        monkeypatch.setattr(claude_play, "PIPE_DIR", pipe_dir)
+        d1 = NLEDaemon(pipe_dir).start()
+        path = game_log.reset_game(d1, "mon-hum-neu-mal", str(tmp_path))
+
+        claude_play.main(["--stop"])
+
+        assert "game saved" in capsys.readouterr().out
+        d2 = NLEDaemon(pipe_dir).start()
+        assert game_log.reset_game(d2, "mon-hum-neu-mal", str(tmp_path)) == path
+        assert lines(path)[-1]["session"]["resumed"] is True
+
+    def test_stop_save_still_saves_and_discard_does_not(self, pipe_dir, tmp_path, monkeypatch):
+        monkeypatch.setattr(claude_play, "PIPE_DIR", pipe_dir)
+        d = NLEDaemon(pipe_dir).start()
+        game_log.reset_game(d, "mon-hum-neu-mal", str(tmp_path))
+        claude_play.main(["--stop", "save"])
+        assert d.has_save()
+
+        d = NLEDaemon(pipe_dir).start()
+        game_log.reset_game(d, "mon-hum-neu-mal", str(tmp_path))  # consumes the save
+        claude_play.main(["--stop", "discard"])
+        assert not d.has_save()
+
+    def test_a_stop_that_cannot_save_reports_it_and_still_stops(self, pipe_dir, monkeypatch, capsys):
+        """No reset yet, so there is nothing to save: NLEDaemon.stop raises after shutdown."""
+        monkeypatch.setattr(claude_play, "PIPE_DIR", pipe_dir)
+        d = NLEDaemon(pipe_dir).start()
+
+        claude_play.main(["--stop"])  # must not raise
+
+        assert "not saved" in capsys.readouterr().out
+        assert not d.is_alive()
+
+    def test_a_stop_on_a_finished_game_reports_it_and_still_stops(self, pipe_dir, monkeypatch, capsys):
+        monkeypatch.setattr(claude_play, "PIPE_DIR", pipe_dir)
+        d = NLEDaemon(pipe_dir).start(max_episode_steps=3)
+        d.reset()
+        while not d.done:
+            d.step(1)
+
+        claude_play.main(["--stop"])  # must not raise
+
+        assert "not saved" in capsys.readouterr().out
+        assert not d.is_alive() and not d.has_save()

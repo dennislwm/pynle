@@ -4,7 +4,7 @@ game_state/ (see nle/scripts/game_log.py and ADR-02).
 
   --start           spawn the daemon
   --reset           start a new game, or resume a saved one
-  --stop [save]     stop the daemon (save: write a save file first)
+  --stop [discard]  save the game and stop the daemon (discard: end the game, no save)
   --help            print this text
   <keys>            send keys, print the screen
 
@@ -218,8 +218,12 @@ def main(argv):
             daemon.start(character=CHARACTER)
             print("daemon started")
         elif verb == "--stop":
-            daemon.stop(save="save" in rest)
-            print("daemon stopped")
+            try:
+                daemon.stop(save="discard" not in rest)  # a lost game must be on purpose
+            except RuntimeError as exc:  # stopped anyway: no reset yet, or the game is over
+                print(f"daemon stopped, not saved: {exc}")
+            else:
+                print("daemon stopped" + (", game saved" if daemon.has_save() else ""))
         elif verb == "--reset":
             print("game file:", game_log.reset_game(daemon, CHARACTER))
             print_screen(daemon)
