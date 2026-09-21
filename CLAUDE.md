@@ -15,7 +15,7 @@ Before the first key of a session:
 4. Give the game one goal, only if its file has none (a resumed game keeps its goal). The targets are the best of each metric over all past games (`exp` is null until a game records it; skip a null):
    `jq -nRc '[inputs|fromjson?|.logs?|select(.)]|{dlvl:(map(.dlvl)|max),xl:(map(.xp)|max),exp:(map(.exp)|max),gold:(map(.gold)|max),hpmax:(map(.hpmax)|max),pwmax:(map(.pwmax)|max),ac:(map(.ac)|min)}' game_state/*.jsonl`
    The goal is to beat, strictly, more than half of the metrics that have a target (AC beats by going lower). With no past logs, the goal is to survive and reach Dlvl 2. Write it as a `goal` note, only when none exists:
-   `f=$(cat /tmp/nle-daemon/game.log); jq -e 'select(.event?.tag=="goal")' "$f" >/dev/null || jq -nc --arg text "<targets and aim>" '{event:{kind:"note",tag:"goal",text:$text}}' >> "$f"`
+   `f=$(cat game_state/pipe/game.log); jq -e 'select(.event?.tag=="goal")' "$f" >/dev/null || jq -nc --arg text "<targets and aim>" '{event:{kind:"note",tag:"goal",text:$text}}' >> "$f"`
 
 On every call:
 
@@ -76,5 +76,5 @@ Every time a game ends or you run `--stop`: take the `mistake` and `violation` n
 - Generic lesson: also save a `hint` for the operator. Never edit `../claude-code-nethack`.
 
 Recording a lesson (needs a game started with `--reset`), until `make play` has a `--note` verb (tags: `mistake`, `insight`, `hint`, `item_id`, `goal`):
-`jq -nc --arg tag <tag> --arg text "<what happened>" --arg rule "<the rule>" '{event:{kind:"note",tag:$tag,text:$text,rule:$rule}}' >> "$(cat /tmp/nle-daemon/game.log)"`
+`jq -nc --arg tag <tag> --arg text "<what happened>" --arg rule "<the rule>" '{event:{kind:"note",tag:$tag,text:$text,rule:$rule}}' >> "$(cat game_state/pipe/game.log)"`
 A hand note carries no turn or level; the driver's notes do.

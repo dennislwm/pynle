@@ -76,6 +76,22 @@ def view_in_tmp(tmp_path, monkeypatch):
     monkeypatch.setattr(claude_play, "VIEW_PATH", str(tmp_path / "game_view.html"))
 
 
+@pytest.fixture(autouse=True)
+def real_game_state_untouched():
+    """REQ-017: a test that creates a game file in the real game_state/ fails, and
+    names itself. Game 005 was such a leak, and G12 then blamed it, not the lost game."""
+
+    def games():
+        try:
+            return {f for f in os.listdir(game_log.STATE_DIR) if game_log._GAME_FILE.match(f)}
+        except FileNotFoundError:
+            return set()
+
+    before = games()
+    yield
+    assert games() == before, "test wrote a game file into the real game_state/"
+
+
 @pytest.fixture
 def dirs():
     pipe_dir = tempfile.mkdtemp(prefix="game_log_pipe_")
@@ -634,3 +650,9 @@ class TestRealDaemon:
         game_log.reset_game(d, "mon-hum-neu-mal", str(tmp_path))
         claude_play.main(["--stop"])  # saves
         assert notes == []
+
+
+class TestPipeDir:
+    def test_the_driver_keeps_its_save_out_of_tmp(self):
+        """REQ-017: the OS clears /tmp, and the save in it went with it (game 004)."""
+        assert os.path.commonpath([claude_play.PIPE_DIR, game_log.STATE_DIR]) == game_log.STATE_DIR

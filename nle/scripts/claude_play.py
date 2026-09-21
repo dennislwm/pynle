@@ -32,7 +32,7 @@ from nle import nethack
 from nle.scripts import game_log
 from nle.scripts.nle_daemon import NLEDaemon
 
-PIPE_DIR = "/tmp/nle-daemon"
+PIPE_DIR = os.path.join(game_log.STATE_DIR, "pipe")  # not /tmp: the OS clears it, and the save with it
 VIEW_PATH = os.path.join(game_log.STATE_DIR, "game_view.html")
 CHARACTER = "mon-hum-neu-mal"
 HUNGER = ("Hungry", "Weak", "Fainting")
