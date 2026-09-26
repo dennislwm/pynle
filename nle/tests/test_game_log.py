@@ -507,6 +507,92 @@ class TestGates:
         assert note["tag"] == "violation" and note["gate"] == "G2" and note["unsent"] == "sy"
 
 
+def map_obs(rows, hero, prev_obs=None):
+    """An observation whose map (tty_chars rows 1-21) is `rows` (a list of
+    strings, row 0 of `rows` lands at tty_chars row 1), hero at (y, x) in
+    map-row coordinates. `prev_obs` seeds tty_colors/tty_cursor shape only."""
+    obs = make_obs()
+    obs["blstats"][nethack.NLE_BL_Y], obs["blstats"][nethack.NLE_BL_X] = hero
+    for r, row in enumerate(rows):
+        for c, ch in enumerate(row):
+            obs["tty_chars"][claude_play.MAP_ROW0 + r, c] = ord(ch)
+    return obs
+
+
+class TestNavHints:
+    """ADR-05 Option 1: far:/new:/frontier:/paths:/least_explored:."""
+
+    ROOM = [
+        "",
+        " #####     ",
+        " #...+.... ",
+        " #.@.#     ",
+        " #...#     ",
+        " #####     ",
+    ]
+
+    def test_far_counts_open_floor_per_direction_no_doors(self):
+        obs = map_obs(self.ROOM, hero=(3, 3))
+        line = claude_play.far_line(obs)
+        assert "N=2" in line and "S=2" in line and "W=2" in line and "E=2" in line
+
+    def test_paths_marks_a_door_crossing(self):
+        obs = map_obs(self.ROOM, hero=(2, 3))  # same row as the door at col 5
+        line = claude_play.paths_line(obs)
+        assert "E=6+" in line  # 6 open cells east, one of them the door
+
+    def test_paths_reads_blocked_with_no_open_cell(self):
+        walled = map_obs(["", " # ", " #@", " # "], hero=(1, 2))
+        assert "E=blocked" in claude_play.paths_line(walled)  # nothing east of @
+
+    def test_frontier_finds_the_nearest_blank_touching_revealed_ground(self):
+        obs = map_obs(self.ROOM, hero=(3, 3))
+        line = claude_play.frontier_line(obs)
+        assert line.startswith("frontier: ") and "none" not in line
+
+    def test_frontier_reads_none_when_fully_enclosed(self):
+        """No blank cell anywhere in the known map -- the level reads as
+        fully explored, not merely "nothing unexplored near the hero"."""
+        full = map_obs(["." * 80] * nethack.ROWNO, hero=(1, 2))
+        assert claude_play.frontier_line(full) == "frontier: none (fully enclosed/explored)"
+
+    def test_new_reads_none_on_the_first_call(self):
+        obs = map_obs(self.ROOM, hero=(3, 3))
+        assert claude_play.new_line(obs, None) == "new: none"
+
+    def test_new_reports_tiles_revealed_since_prev_obs(self):
+        prev = map_obs(["", " #####     ", " #...+     ", " #.@.#     ", " #...#     ", " #####     "], hero=(3, 3))
+        obs = map_obs(self.ROOM, hero=(3, 3))  # the corridor past the door is now visible
+        line = claude_play.new_line(obs, prev)
+        assert line != "new: none" and "+" in line  # relative offsets, at least one revealed tile
+
+    def test_new_caps_enumeration_and_summarizes_the_rest(self):
+        wide_prev = ["", "#" + " " * 30]
+        wide_obs = ["", "#" + "." * 30]
+        prev = map_obs(wide_prev, hero=(1, 0))
+        obs = map_obs(wide_obs, hero=(1, 0))
+        line = claude_play.new_line(obs, prev)
+        assert "more)" in line
+
+    def test_least_explored_ranks_the_sparser_half_first(self):
+        # Everything revealed sits north of the map's midpoint; south is blank.
+        rows = [""] + [" " + "." * 20 for _ in range(3)] + [" " + " " * 20 for _ in range(17)]
+        obs = map_obs(rows, hero=(1, 1))
+        line = claude_play.least_explored_line(obs)
+        assert line.startswith("least_explored: ")
+        ranked = line.split("ranked: ")[1]
+        assert ranked.split(",")[0] == "S"  # least explored (0% coverage) ranked first
+
+    def test_print_screen_appends_all_five_lines(self, capsys, monkeypatch, tmp_path):
+        monkeypatch.setattr(claude_play, "VIEW_PATH", str(tmp_path / "game_view.html"))
+        d = FakeDaemon("unused")
+        d.obs = map_obs(self.ROOM, hero=(3, 3))
+        claude_play.print_screen(d)
+        out = capsys.readouterr().out
+        for prefix in ("far: ", "new: ", "frontier: ", "paths: ", "least_explored: "):
+            assert prefix in out
+
+
 class TestRealDaemon:
     def test_monsters_reads_the_pet_from_a_real_observation(self, pipe_dir, tmp_path):
         """REQ-011: _monsters indexes glyphs/screen_descriptions by blstats Y, X

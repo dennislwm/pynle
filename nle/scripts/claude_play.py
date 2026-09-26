@@ -41,6 +41,13 @@ DIRECTIONS = {  # (dy, dx)
     "h": (0, -1), "j": (1, 0), "k": (-1, 0), "l": (0, 1),
     "y": (-1, -1), "u": (-1, 1), "b": (1, -1), "n": (1, 1),
 }
+COMPASS = {  # ADR-05 Option 1: nav_hints' 8-way labels, N first then clockwise
+    "N": (-1, 0), "NE": (-1, 1), "E": (0, 1), "SE": (1, 1),
+    "S": (1, 0), "SW": (1, -1), "W": (0, -1), "NW": (-1, -1),
+}
+MAP_ROW0 = 1  # tty_chars row 0 is the message line; the map starts at row 1
+DOOR_CHARS = set("+'")  # closed / open door glyphs, crossed by paths:
+NEW_CAP = 8  # new: enumerates at most this many revealed tiles
 TURN_KEYS = set(DIRECTIONS) | set("Fs.")  # keys that spend a turn on their own
 # step() takes an index into nethack.ACTIONS, not a key code.
 ACTION_INDEX = {int(a): i for i, a in enumerate(nethack.ACTIONS)}
@@ -227,13 +234,142 @@ def run_keys(daemon, keys, action_index=ACTION_INDEX, state_dir=game_log.STATE_D
     return None
 
 
-def print_screen(daemon):
+def _map_rows(obs):
+    """The 21 map rows of tty_chars (row 0 is the message line), decoded."""
+    return [
+        bytes(row).decode("ascii", "replace")
+        for row in obs["tty_chars"][MAP_ROW0 : MAP_ROW0 + nethack.ROWNO]
+    ]
+
+
+def _hero_yx(obs):
+    return int(obs["blstats"][nethack.NLE_BL_Y]), int(obs["blstats"][nethack.NLE_BL_X])
+
+
+def _walk(rows, y, x, dy, dx):
+    """Steps of non-blank ground from (y, x) in direction (dy, dx), and how
+    many of those steps crossed a door -- shared by far: and paths:."""
+    steps, doors = 0, 0
+    while True:
+        y, x = y + dy, x + dx
+        if not (0 <= y < len(rows) and 0 <= x < len(rows[y])):
+            break
+        ch = rows[y][x]
+        if ch == " ":
+            break
+        if ch in DOOR_CHARS:
+            doors += 1
+        steps += 1
+    return steps, doors
+
+
+def far_line(obs):
+    """ADR-05 Option 1: per-direction open-run distance, no doors."""
+    rows = _map_rows(obs)
+    y, x = _hero_yx(obs)
+    parts = (f"{d}={_walk(rows, y, x, dy, dx)[0]}" for d, (dy, dx) in COMPASS.items())
+    return "far: " + " ".join(parts)
+
+
+def paths_line(obs):
+    """ADR-05 Option 1: per-direction escape/dead-end line. Door crossings on
+    a direction's run are marked with a trailing +; 0 reads as blocked."""
+    rows = _map_rows(obs)
+    y, x = _hero_yx(obs)
+    parts = []
+    for d, (dy, dx) in COMPASS.items():
+        steps, doors = _walk(rows, y, x, dy, dx)
+        reading = "blocked" if steps == 0 else f"{steps}{'+' * doors}"
+        parts.append(f"{d}={reading}")
+    return "paths: " + " ".join(parts)
+
+
+def frontier_line(obs):
+    """ADR-05 Option 1: nearest blank cell touching a revealed cell (a
+    frontier candidate), by taxicab distance from the hero."""
+    rows = _map_rows(obs)
+    y0, x0 = _hero_yx(obs)
+    best = None
+    for r, row in enumerate(rows):
+        for c, ch in enumerate(row):
+            if ch != " ":
+                continue
+            for dy, dx in COMPASS.values():
+                rr, cc = r + dy, c + dx
+                if 0 <= rr < len(rows) and 0 <= cc < len(rows[rr]) and rows[rr][cc] != " ":
+                    dist = abs(r - y0) + abs(c - x0)
+                    if best is None or dist < best[0]:
+                        best = (dist, r - y0, c - x0)
+                    break
+    if best is None:
+        return "frontier: none (fully enclosed/explored)"
+    _, dr, dc = best
+    return f"frontier: {dr:+d},{dc:+d}"
+
+
+def new_line(obs, prev_obs):
+    """ADR-05 Option 1: tiles revealed since prev_obs (None on the first call
+    of a game, or right after --reset -- report nothing rather than flagging
+    the whole map as new)."""
+    if prev_obs is None:
+        return "new: none"
+    rows, prev_rows = _map_rows(obs), _map_rows(prev_obs)
+    y0, x0 = _hero_yx(obs)
+    found = [
+        (r - y0, c - x0)
+        for r, (row, prow) in enumerate(zip(rows, prev_rows))
+        for c in range(min(len(row), len(prow)))
+        if row[c] != " " and prow[c] == " "
+    ]
+    if not found:
+        return "new: none"
+    shown = " ".join(f"{dr:+d},{dc:+d}" for dr, dc in found[:NEW_CAP])
+    extra = f" (+{len(found) - NEW_CAP} more)" if len(found) > NEW_CAP else ""
+    return "new: " + shown + extra
+
+
+def least_explored_line(obs):
+    """ADR-05 Option 1: N/S/E/W quadrant coverage, split at the map's own
+    fixed midpoint, ranked least-explored first."""
+    rows = _map_rows(obs)
+    mid_r, mid_c = len(rows) // 2, (len(rows[0]) if rows else 0) // 2
+    seen = {"N": 0, "S": 0, "E": 0, "W": 0}
+    total = {"N": 0, "S": 0, "E": 0, "W": 0}
+    for r, row in enumerate(rows):
+        ns = "N" if r < mid_r else "S"
+        for c, ch in enumerate(row):
+            ew = "W" if c < mid_c else "E"
+            total[ns] += 1
+            total[ew] += 1
+            if ch != " ":
+                seen[ns] += 1
+                seen[ew] += 1
+    coverage = {k: (seen[k] / total[k] if total[k] else 0.0) for k in seen}
+    ranked = sorted(coverage, key=coverage.get)
+    by_dir = " ".join(f"{k}={coverage[k]:.0%}" for k in ("N", "S", "E", "W"))
+    return f"least_explored: {by_dir} -- ranked: {','.join(ranked)}"
+
+
+def nav_hints(obs, prev_obs):
+    """ADR-05 Option 1's five lines, appended to print_screen's output."""
+    return [
+        far_line(obs),
+        new_line(obs, prev_obs),
+        frontier_line(obs),
+        paths_line(obs),
+        least_explored_line(obs),
+    ]
+
+
+def print_screen(daemon, prev_obs=None):
     obs = daemon.obs
     cursor = tuple(int(x) for x in obs["tty_cursor"])
     print("DONE" if daemon.done else "", daemon.info.get("end_status"), "cursor(row,col)=", cursor)
     for row in game_log.screen(obs).split("\n"):
         if row:
             print(row)
+    for line in nav_hints(obs, prev_obs):
+        print(line)
     game_log.write_view(obs, VIEW_PATH)
 
 
@@ -273,8 +409,9 @@ def main(argv):
         raise SystemExit("pass the keys as one quoted argument")
     else:
         daemon.status()  # this call is a new process: re-read the last obs first
+        prev_obs = daemon.obs  # for new:, tiles revealed since this call's own steps began
         run_keys(daemon, argv[0])
-        print_screen(daemon)
+        print_screen(daemon, prev_obs)
 
 
 if __name__ == "__main__":

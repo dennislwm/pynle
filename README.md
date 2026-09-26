@@ -233,6 +233,17 @@ per line:
    is never a rest. G8 applies only to a batch of moves, `F`, `s`, `.` and
    digits, so a cast, throw or quaff (which takes prompt answers) is not
    refused. The `violation` note carries a `gate` field and the `unsent` keys.
+
+   The screen is followed by five computed lines (ADR-05, Option 1), read
+   from the same known map:
+   - `far:`: open-floor distance per direction.
+   - `new:`: tiles revealed by this call's own steps.
+   - `frontier:`: nearest unexplored tile.
+   - `paths:`: per-direction escape/dead-end line, door crossings marked `+`.
+   - `least_explored:`: N/S/E/W coverage, ranked least-explored first.
+
+   `least_explored:` and `paths:` each pair with a required action: see the
+   code repo `CLAUDE.md` gate table (S29, S30).
 4. `make play ARGS='--stop'` saves and stops. `--start` then `--reset`
    resumes into the same file. `--stop discard` ends the game without a save,
    and the next `--reset` opens a new file. A finished game, or one never
