@@ -72,11 +72,14 @@ VIEW_HEAD = (
 )
 
 
-def write_view(obs, path):
+def write_view(obs, path, hints=()):
     """Latest screen as colored HTML, for the analyst to watch in a browser tab.
     Builds the page in a temp file beside `path`, then renames it over `path`
     (same directory, so always atomic): a page reload never sees a torn file.
-    Never raises and never prints: it must not change what the player sees."""
+    Never raises and never prints: it must not change what the player sees.
+    `hints` (ADR-05/REQ-020, e.g. claude_play.nav_hints) are appended as plain
+    text after </pre>, outside the screen render, so they are never mistaken
+    for screen content."""
     tmp = None
     try:
         rows = [
@@ -87,11 +90,12 @@ def write_view(obs, path):
             )
             for chars, colors in zip(obs["tty_chars"], obs["tty_colors"])
         ]
+        hint_lines = "".join(f"<div>{html.escape(line)}</div>" for line in hints)
         with tempfile.NamedTemporaryFile(
             "w", dir=os.path.dirname(path), suffix=".tmp", delete=False
         ) as f:
             tmp = f.name
-            f.write(VIEW_HEAD + "\n".join(rows) + "</pre>\n")
+            f.write(VIEW_HEAD + "\n".join(rows) + "</pre>" + hint_lines + "\n")
         os.replace(tmp, path)
     except Exception:
         if tmp:  # a failed rename must not leave a temp file on every call

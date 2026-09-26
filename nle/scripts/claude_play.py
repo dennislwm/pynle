@@ -368,9 +368,10 @@ def print_screen(daemon, prev_obs=None):
     for row in game_log.screen(obs).split("\n"):
         if row:
             print(row)
-    for line in nav_hints(obs, prev_obs):
+    hints = nav_hints(obs, prev_obs)
+    for line in hints:
         print(line)
-    game_log.write_view(obs, VIEW_PATH)
+    game_log.write_view(obs, VIEW_PATH, hints)
 
 
 def main(argv):

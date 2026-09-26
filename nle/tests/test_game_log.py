@@ -383,6 +383,14 @@ class TestWriteView:
         assert capsys.readouterr().out == with_failure
         assert os.path.exists(tmp_path / "v.html")
 
+    def test_hints_are_appended_after_the_screen_pre_block(self, tmp_path):
+        """REQ-020: the live analyst view carries the same nav hints as the
+        player's stdout, kept outside <pre> so they read as separate text."""
+        path = str(tmp_path / "v.html")
+        game_log.write_view(make_obs(), path, hints=["far: N=2 S=2", "frontier: -1,+0"])
+        page = open(path).read()
+        assert page.index("</pre>") < page.index("far: N=2 S=2") < page.index("frontier: -1,+0")
+
 
 def gate_obs(monsters, hero=(5, 5)):
     """An observation with the hero at (y, x) and {(y, x): description} monsters."""
@@ -584,13 +592,16 @@ class TestNavHints:
         assert ranked.split(",")[0] == "S"  # least explored (0% coverage) ranked first
 
     def test_print_screen_appends_all_five_lines(self, capsys, monkeypatch, tmp_path):
-        monkeypatch.setattr(claude_play, "VIEW_PATH", str(tmp_path / "game_view.html"))
+        view_path = str(tmp_path / "game_view.html")
+        monkeypatch.setattr(claude_play, "VIEW_PATH", view_path)
         d = FakeDaemon("unused")
         d.obs = map_obs(self.ROOM, hero=(3, 3))
         claude_play.print_screen(d)
         out = capsys.readouterr().out
+        page = open(view_path).read()
         for prefix in ("far: ", "new: ", "frontier: ", "paths: ", "least_explored: "):
             assert prefix in out
+            assert prefix in page  # REQ-020: the live analyst view carries them too
 
 
 class TestRealDaemon:

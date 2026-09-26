@@ -273,6 +273,8 @@ To watch a game live, open `game_state/game_view.html` in a browser. It reloads
 every 2 seconds.
 
 - The driver rewrites that one file after each call.
+- The five nav-hint lines (`far:`/`new:`/`frontier:`/`paths:`/`least_explored:`,
+  see above) are appended below the screen, same text as the player's stdout.
 - It shows the latest screen only.
 - It is built in a temp file beside it and renamed over it, so a reload never
   sees a half-written page.
