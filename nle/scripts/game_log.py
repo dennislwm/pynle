@@ -67,8 +67,8 @@ PALETTE = [
 ]
 VIEW_HEAD = (
     '<!doctype html><meta charset="utf-8"><meta http-equiv="refresh" content="2">'
-    "<title>NetHack</title><style>body{background:#111;margin:0;padding:12px}"
-    'pre{color:#ddd;font:14px/1.2 "IBM Plex Mono",ui-monospace,monospace;margin:0}</style><pre>'
+    "<title>NetHack</title><style>body{background:#111;color:#ddd;margin:0;padding:12px}"
+    'pre{font:14px/1.2 "IBM Plex Mono",ui-monospace,monospace;margin:0}</style><pre>'
 )
 
 
