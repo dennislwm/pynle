@@ -564,6 +564,19 @@ class TestNavHints:
         full = map_obs(["." * 80] * nethack.ROWNO, hero=(1, 2))
         assert claude_play.frontier_line(full) == "frontier: none (fully enclosed/explored)"
 
+    def test_frontier_finds_a_dead_end_corridor_with_no_blank_neighbor(self):
+        """REQ-021: a corridor tile ('#') with at most one passable
+        neighbor is a frontier candidate even with zero blank neighbors --
+        game 006's maze incident. Map is entirely '.' except a sealed
+        one-tile corridor stub (door then dead end), so no blank cell
+        exists anywhere: this is the only possible candidate."""
+        rows = ["." * 80 for _ in range(nethack.ROWNO)]
+        rows[9] = rows[9][:30] + "-" * 11 + rows[9][41:]
+        rows[10] = rows[10][:37] + "+#-" + rows[10][40:]
+        rows[11] = rows[11][:30] + "-" * 11 + rows[11][41:]
+        obs = map_obs(rows, hero=(10, 33))
+        assert claude_play.frontier_line(obs) == "frontier: +0,+5"
+
     def test_new_reads_none_on_the_first_call(self):
         obs = map_obs(self.ROOM, hero=(3, 3))
         assert claude_play.new_line(obs, None) == "new: none"

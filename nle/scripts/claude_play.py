@@ -284,23 +284,49 @@ def paths_line(obs):
     return "paths: " + " ".join(parts)
 
 
+WALLS = set("-|")  # denylist, not an allowlist: matches the reference's own
+# is_passable rationale (cursor_probe.py:111-128) -- dozens of item/corpse
+# glyphs sit on walkable floor, so "not blank and not a wall" is correct
+# where enumerating "floor-ish" characters would miss one.
+
+
+def _passable(ch):
+    return ch != " " and ch not in WALLS
+
+
 def frontier_line(obs):
-    """ADR-05 Option 1: nearest blank cell touching a revealed cell (a
-    frontier candidate), by taxicab distance from the hero."""
+    """ADR-05 Option 1 (REQ-019) plus REQ-021: nearest candidate by taxicab
+    distance from the hero, one scan, two kinds of candidate --
+    (1) a blank cell touching a revealed cell (REQ-019's original case), and
+    (2) a corridor tile ('#') with at most one passable neighbor -- a dead
+    end even though every neighbor is already revealed (game 006's maze
+    incident). Both are pure scans over the current observation; neither
+    needs walked-tile history (unlike the reference's other two categories,
+    left out -- see REQ-021)."""
     rows = _map_rows(obs)
     y0, x0 = _hero_yx(obs)
     best = None
     for r, row in enumerate(rows):
         for c, ch in enumerate(row):
-            if ch != " ":
-                continue
-            for dy, dx in COMPASS.values():
-                rr, cc = r + dy, c + dx
-                if 0 <= rr < len(rows) and 0 <= cc < len(rows[rr]) and rows[rr][cc] != " ":
-                    dist = abs(r - y0) + abs(c - x0)
-                    if best is None or dist < best[0]:
-                        best = (dist, r - y0, c - x0)
-                    break
+            is_candidate = False
+            if ch == " ":
+                is_candidate = any(
+                    0 <= r + dy < len(rows) and 0 <= c + dx < len(rows[r + dy])
+                    and rows[r + dy][c + dx] != " "
+                    for dy, dx in COMPASS.values()
+                )
+            elif ch == "#":
+                passable_neighbors = sum(
+                    1
+                    for dy, dx in COMPASS.values()
+                    if 0 <= r + dy < len(rows) and 0 <= c + dx < len(rows[r + dy])
+                    and _passable(rows[r + dy][c + dx])
+                )
+                is_candidate = passable_neighbors <= 1
+            if is_candidate:
+                dist = abs(r - y0) + abs(c - x0)
+                if best is None or dist < best[0]:
+                    best = (dist, r - y0, c - x0)
     if best is None:
         return "frontier: none (fully enclosed/explored)"
     _, dr, dc = best
