@@ -238,7 +238,7 @@ per line:
    from the same known map:
    - `far:`: open-floor distance per direction.
    - `new:`: tiles revealed by this call's own steps.
-   - `frontier:`: nearest unexplored tile.
+   - `frontier:`: nearest unexplored tile, or unwalked dead end.
    - `paths:`: per-direction escape/dead-end line, door crossings marked `+`.
    - `least_explored:`: N/S/E/W coverage, ranked least-explored first.
 
