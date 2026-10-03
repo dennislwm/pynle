@@ -411,10 +411,7 @@ def advice_menu(obs):
 
 
 def _parse_answer(body):
-    # ponytail: the wrapper around question answers is undocumented (docs show only the
-    # answer itself); {"questions": {id: answer}} is assumed. A human runs one real call
-    # to confirm it. A wrong guess is a KeyError, reported as `bad answer`.
-    answer = json.loads(body)["questions"][ADVICE_QUESTION]
+    answer = json.loads(body)["answers"][ADVICE_QUESTION]
     return {"choice": answer["choice"], "dist": answer["probabilities"], "confidence": answer["confidence"]}
 
 

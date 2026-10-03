@@ -638,7 +638,7 @@ class TestAdvice:
                 return False
 
             def read(self):
-                return json.dumps({"questions": {"advice": {
+                return json.dumps({"answers": {"advice": {
                     "choice": "rest", "probabilities": {"rest": 0.7, "melee": 0.3}, "confidence": 0.8}}}).encode()
 
         def fake_urlopen(req, timeout=None):
