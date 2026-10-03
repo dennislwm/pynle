@@ -75,6 +75,16 @@ def keys_of(path):
 def view_in_tmp(tmp_path, monkeypatch):
     """Keep tests from writing the real game_state/game_view.html."""
     monkeypatch.setattr(claude_play, "VIEW_PATH", str(tmp_path / "game_view.html"))
+    monkeypatch.setattr(claude_play, "PIPE_DIR", str(tmp_path / "pipe"))  # never read the real game's goal
+
+
+@pytest.fixture(autouse=True)
+def no_real_key():
+    """The advisor now runs on every call: a test that does not stub urlopen must not reach the network."""
+    key = os.environ.pop("TYPESAFE_API_KEY", None)
+    yield
+    if key is not None:
+        os.environ["TYPESAFE_API_KEY"] = key
 
 
 @pytest.fixture(autouse=True)
@@ -376,6 +386,7 @@ class TestWriteView:
 
     def test_a_failed_write_leaves_the_player_output_unchanged(self, tmp_path, capsys, monkeypatch):
         d = FakeDaemon(str(tmp_path))
+        monkeypatch.setattr(claude_play, "advice", lambda obs, hints=None: None)
         monkeypatch.setattr(claude_play, "VIEW_PATH", str(tmp_path / "no" / "such" / "v.html"))
         claude_play.print_screen(d)
         with_failure = capsys.readouterr().out
@@ -610,6 +621,7 @@ class TestNavHints:
         monkeypatch.setattr(claude_play, "VIEW_PATH", view_path)
         d = FakeDaemon("unused")
         d.obs = map_obs(self.ROOM, hero=(3, 3))
+        monkeypatch.setattr(claude_play, "advice", lambda obs, hints=None: None)
         claude_play.print_screen(d)
         out = capsys.readouterr().out
         page = open(view_path).read()
@@ -630,20 +642,25 @@ class TestAdvice:
         monkeypatch.setattr(claude_play, "VIEW_PATH", str(tmp_path / "v.html"))
         calls = []
 
+        canned = {"advice": {"choice": "rest", "probabilities": {"rest": 0.7, "melee": 0.3}, "confidence": 0.8},
+                  "hint": {"choice": "paths", "probabilities": {"paths": 0.6, "least_explored": 0.4}}}
+
         class Resp:
+            def __init__(self, asked):
+                self.asked = asked
+
             def __enter__(self):
                 return self
 
             def __exit__(self, *a):
                 return False
 
-            def read(self):
-                return json.dumps({"answers": {"advice": {
-                    "choice": "rest", "probabilities": {"rest": 0.7, "melee": 0.3}, "confidence": 0.8}}}).encode()
+            def read(self):  # answer only the questions that were sent, as the API does
+                return json.dumps({"answers": {k: v for k, v in canned.items() if k in self.asked}}).encode()
 
         def fake_urlopen(req, timeout=None):
             calls.append((req, timeout))
-            return Resp()
+            return Resp(set(json.loads(req.data)["questions"]))
 
         monkeypatch.setattr(claude_play.urllib.request, "urlopen", fake_urlopen)
         return calls
@@ -664,10 +681,184 @@ class TestAdvice:
         events = [e["event"] for e in lines(game_log.current_game(str(tmp_path))) if "event" in e]
         return [e for e in events if e.get("tag") == "advice"]
 
-    def test_no_call_on_a_safe_full_hp_obs(self, api, tmp_path, capsys):
+    def asked(self, api):
+        """The question ids in the last request."""
+        return set(json.loads(api[-1][0].data)["questions"])
+
+    def test_a_calm_obs_asks_only_the_hint_and_writes_no_note(self, api, tmp_path, capsys):
         claude_play.print_screen(self.play(tmp_path))
-        assert api == [] and "advice" not in capsys.readouterr().out
+        out = capsys.readouterr().out
+        assert self.asked(api) == {"hint"} and len(api) == 1
+        assert "hint: use paths 0.60 least_explored 0.40" in out and "advice:" not in out
         assert self.advice_notes(tmp_path) == []
+        assert "hint: use paths" in open(tmp_path / "v.html").read()
+
+    def test_a_calm_turn_fails_silently(self, api, tmp_path, monkeypatch, capsys):
+        monkeypatch.delenv("TYPESAFE_API_KEY")
+        assert claude_play.advice(make_obs()) is None
+        monkeypatch.setenv("TYPESAFE_API_KEY", self.KEY)
+
+        def boom(req, timeout=None):
+            raise urllib.error.URLError("boom SECRET")
+
+        monkeypatch.setattr(claude_play.urllib.request, "urlopen", boom)
+        claude_play.print_screen(self.play(tmp_path))
+        assert capsys.readouterr().out.count("unavailable") == 0 and self.advice_notes(tmp_path) == []
+
+    def test_a_triggered_turn_without_a_class_answer_is_a_bad_answer(self, api, monkeypatch):
+        monkeypatch.setattr(claude_play, "_parse_answer", lambda body: {"hint": {"choice": "far", "dist": {}}})
+        assert claude_play.advice(self.danger()) == {"reason": "bad answer"}
+
+    @pytest.mark.parametrize("dist, asked", [(5, {"advice", "hint"}), (6, {"hint"})])
+    def test_a_hostile_in_range_triggers(self, api, dist, asked):
+        claude_play.advice(gate_obs({(5, 5 + dist): "jackal"}))
+        assert self.asked(api) == asked
+
+    def test_a_peaceful_in_range_triggers_but_a_pet_does_not(self, api):
+        assert "choice" not in claude_play.advice(gate_obs({(5, 6): "tame little dog"}))
+        assert self.asked(api) == {"hint"}
+        assert claude_play.advice(gate_obs({(5, 6): "peaceful watchman"}))["choice"] == "rest"
+        assert self.asked(api) == {"advice", "hint"}
+
+    @pytest.mark.parametrize("field, value", [
+        (nethack.NLE_BL_HUNGER, 2),  # Hungry; 1 is not hungry
+        (nethack.NLE_BL_CAP, 1),  # Burdened
+        (nethack.NLE_BL_CONDITION, nethack.BL_MASK_CONF),
+    ])
+    def test_a_status_triggers(self, api, field, value):
+        obs = make_obs()
+        obs["blstats"][field] = value
+        assert claude_play.advice(obs)["choice"] == "rest"
+        assert len(api) == 1
+
+    def test_not_hungry_and_a_harmless_condition_do_not_trigger(self, api):
+        obs = make_obs()
+        obs["blstats"][nethack.NLE_BL_HUNGER] = 1
+        obs["blstats"][nethack.NLE_BL_CONDITION] = nethack.BL_MASK_FLY
+        assert "choice" not in claude_play.advice(obs) and self.asked(api) == {"hint"}
+
+    def test_a_message_keyword_triggers(self, api):
+        assert claude_play.advice(make_obs(top="You see here a dart."))["choice"] == "rest"
+        assert "choice" not in claude_play.advice(make_obs(top="You hear a door open."))  # hint only
+        assert self.asked(api) == {"hint"}
+        assert claude_play.advice(make_obs(top="k - an elven leather helm."))["choice"] == "rest"  # a pickup
+        assert len(api) == 3
+
+    @pytest.mark.parametrize("top", ["You see here a dart.--More--", "Really attack? [yn]"])
+    def test_a_pending_prompt_suppresses_advice(self, api, top):
+        assert claude_play.advice(make_obs(hp=5, top=top)) is None and api == []
+
+    def test_a_popup_more_below_the_top_line_suppresses_advice(self, api):
+        obs = make_obs(hp=5)
+        obs["tty_chars"][5, 30:38] = list(b"--More--")
+        assert claude_play.advice(obs) is None and api == []
+
+    def stairs_obs(self, hp=13):
+        obs = make_obs(hp=hp)
+        obs["tty_chars"][8, 10] = ord(">")
+        return obs
+
+    def state_of(self, api):
+        return json.loads(api[-1][0].data)["state"]
+
+    def test_stairs_trigger_and_give_the_descent_check(self, api):
+        claude_play.advice(self.stairs_obs())
+        assert self.state_of(api)["descent_check"] == {
+            "hp_ok": True, "not_hungry": True, "no_status_or_burden": True, "nothing_adjacent": True}
+
+    def test_no_descent_check_without_stairs(self, api):
+        claude_play.advice(make_obs(hp=5))
+        assert "descent_check" not in self.state_of(api)
+
+    @pytest.mark.parametrize("hp, ok", [(9, False), (10, True)])  # of 13: 0.69 fails the 0.7 limit, 0.77 passes
+    def test_the_descent_hp_limit(self, api, hp, ok):
+        claude_play.advice(self.stairs_obs(hp))
+        assert self.state_of(api)["descent_check"]["hp_ok"] is ok
+
+    @pytest.mark.parametrize("field, value, key", [
+        (nethack.NLE_BL_HUNGER, 2, "not_hungry"),
+        (nethack.NLE_BL_CAP, 1, "no_status_or_burden"),
+        (nethack.NLE_BL_CONDITION, nethack.BL_MASK_STUN, "no_status_or_burden"),
+    ])
+    def test_each_descent_fact_flips(self, api, field, value, key):
+        obs = self.stairs_obs()
+        obs["blstats"][field] = value
+        claude_play.advice(obs)
+        assert self.state_of(api)["descent_check"][key] is False
+
+    def test_an_adjacent_hostile_flips_nothing_adjacent(self, api):
+        obs = gate_obs({(5, 6): "jackal"})
+        obs["tty_chars"][8, 10] = ord(">")
+        claude_play.advice(obs)
+        assert self.state_of(api)["descent_check"]["nothing_adjacent"] is False
+
+    def test_the_goal_note_reaches_the_state(self, api, tmp_path, monkeypatch):
+        monkeypatch.setattr(claude_play, "PIPE_DIR", str(tmp_path))
+        self.play(tmp_path)
+        line = json.dumps({"event": {"kind": "note", "tag": "goal", "text": "beat 4 of 7"}}, separators=(",", ":"))
+        with open(game_log.current_game(str(tmp_path)), "a") as f:
+            f.write(line + "\n")  # compact, as jq -nc writes it
+        claude_play.advice(self.danger())
+        assert self.state_of(api)["goal"] == "beat 4 of 7"
+
+    def test_no_goal_note_means_no_goal_key(self, api, tmp_path, monkeypatch):
+        monkeypatch.setattr(claude_play, "PIPE_DIR", str(tmp_path))
+        self.play(tmp_path)
+        claude_play.advice(self.danger())
+        assert "goal" not in self.state_of(api)
+
+    def test_the_request_asks_the_class_and_the_hint(self, api):
+        hints = ["far: N=1", "paths: N=1"]
+        claude_play.advice(self.danger(), hints)
+        (req, _), = api
+        body = json.loads(req.data)
+        assert set(body["questions"]) == {"advice", "hint"}
+        assert set(body["questions"]["hint"]["criteria"]) == set(claude_play.ADVICE["hint"]["options"])
+        assert body["state"]["nav_hints"] == hints
+        claude_play.advice(self.danger())  # no hints: no key
+        assert "nav_hints" not in json.loads(api[-1][0].data)["state"]
+
+    def test_the_hint_is_parsed_and_optional(self):
+        body = lambda extra: json.dumps({"answers": {"advice": {  # noqa: E731
+            "choice": "move", "probabilities": {"move": 1.0}, "confidence": 0.9}, **extra}}).encode()
+        got = claude_play._parse_answer(body({"hint": {"choice": "paths", "probabilities": {"paths": 0.6, "far": 0.4}}}))
+        assert got["hint"] == {"choice": "paths", "dist": {"paths": 0.6, "far": 0.4}}
+        assert "hint" not in claude_play._parse_answer(body({}))
+
+    def test_the_hint_options_match_the_nav_hint_lines(self):
+        obs = make_obs()
+        obs["tty_chars"][5, 10] = ord(".")
+        names = {line.split(":")[0] for line in claude_play.nav_hints(obs, obs)}
+        assert names == set(claude_play.ADVICE["hint"]["options"])
+
+    @pytest.mark.parametrize("choice, shown", [("move", True), ("rest", False)])
+    def test_the_line_shows_a_hint_only_when_move_leads(self, tmp_path, capsys, monkeypatch, choice, shown):
+        result = {"choice": choice, "dist": {choice: 1.0}, "confidence": 0.9,
+                  "hint": {"choice": "paths", "dist": {"paths": 0.6, "far": 0.3, "frontier": 0.1}}}
+        monkeypatch.setattr(claude_play, "advice", lambda obs, hints=None: result)
+        claude_play.print_screen(self.play(tmp_path))
+        assert ("| use paths 0.60 far 0.30" in capsys.readouterr().out) is shown
+        n, = self.advice_notes(tmp_path)
+        assert n["hint"]["choice"] == "paths"  # always kept in the note
+
+    def test_the_rest_rubric_names_the_hunger_gate(self):
+        assert "Hungry" in claude_play.ADVICE["menu"]["rest"] and "G5" in claude_play.ADVICE["menu"]["rest"]
+
+    def test_the_menu_file_is_consistent(self):
+        menu, needs = claude_play.ADVICE["menu"], claude_play.ADVICE["needs"]
+        assert all(isinstance(r, str) and r for r in menu.values())
+        assert set(needs) <= set(menu)
+        assert all(isinstance(getattr(nethack, c), int) for cs in needs.values() for c in cs)
+        assert "melee" not in menu and {"fight", "eat", "pickup", "interact", "equip", "cast", "descend"} <= set(menu)
+        assert all(getattr(nethack, c) is not None for c in claude_play.ADVICE["stats"].values())
+        assert "cast" not in menu["item"]
+
+    def test_eat_only_with_food_and_item_has_no_throw(self):
+        obs = make_obs()
+        assert "eat" not in claude_play.advice_menu(obs)
+        obs["inv_oclasses"] = np.array([nethack.FOOD_CLASS, nethack.MAXOCLASSES])
+        assert "eat" in claude_play.advice_menu(obs) and "item" not in claude_play.advice_menu(obs)
+        assert "throw" not in claude_play.ADVICE["menu"]["item"]
 
     def test_skipped_when_the_game_is_done(self, api, tmp_path):
         d = self.play(tmp_path, self.danger())
@@ -692,11 +883,13 @@ class TestAdvice:
         assert req.get_header("Authorization") == "Bearer " + self.KEY
         assert timeout == claude_play.ADVICE_TIMEOUT == 5
         assert body["model"] == "jev-latest" and q["type"] == "choice"
-        assert set(q["criteria"]) == {"melee", "rest", "move", "engrave", "pray", "other"}
+        assert set(q["criteria"]) == {"fight", "rest", "move", "engrave", "pray", "pickup", "interact", "equip", "cast", "descend", "other"}
         s = body["state"]
         assert (s["hp"], s["hpmax"], s["adjacent_hostiles"]) == (13, 13, 1)
         assert s["adjacent_hostile_descriptions"] == ["jackal"]
         assert s["inventory"] == ["a dart"] and "screen" in s and "menu" in s
+        assert s["character"] == claude_play.CHARACTER
+        assert set(s["stats"]) == set(claude_play.ADVICE["stats"]) and all(isinstance(v, int) for v in s["stats"].values())
 
     def test_item_only_with_a_usable_item(self):
         obs = make_obs()
@@ -891,6 +1084,7 @@ class TestRealDaemon:
 
 
 class TestPipeDir:
-    def test_the_driver_keeps_its_save_out_of_tmp(self):
+    def test_the_driver_keeps_its_save_out_of_tmp(self, monkeypatch):
         """REQ-017: the OS clears /tmp, and the save in it went with it (game 004)."""
+        monkeypatch.undo()  # the autouse fixture points PIPE_DIR at a tmp dir; check the real value
         assert os.path.commonpath([claude_play.PIPE_DIR, game_log.STATE_DIR]) == game_log.STATE_DIR

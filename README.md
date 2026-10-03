@@ -245,11 +245,20 @@ per line:
    `least_explored:` and `paths:` each pair with a required action: see the
    code repo `CLAUDE.md` gate table (S29, S30).
 
-   A sixth line, `advice:`, appears only in a dangerous moment: HP under half,
-   or a hostile adjacent (ADR-07, Option 2). It is a TypeSafe Jev choice over
-   `melee`, `rest`, `move`, `engrave`, `pray`, `other` and `item` (only with a
-   usable item), with probabilities and a confidence. It never refuses a
-   batch, and each one is recorded as a note tagged `advice`. To enable it:
+   A sixth line, `advice:`, appears only when it matters (ADR-07, Option 2):
+   a non-pet monster within 5 squares, HP under half, hunger, a burden, a bad
+   status condition, a down staircase on the map, or a message such as "You
+   see here". It stays silent while a `--More--` or `[yn]` prompt is pending.
+   It is a TypeSafe Jev choice over the menu in `nle/scripts/advice.json`
+   (options with the gate-table rules in their text, which ones need an item
+   in the pack, the trigger numbers and the stats sent), with probabilities
+   and a confidence. It also sees the nav hints and answers a second question,
+   which nav hint to read, printed after the line (`| use paths 0.41
+   least_explored 0.27`) when `move` leads.
+   On a calm turn only this question is asked, and the sixth line reads
+   `hint: use ...`; it writes no note and fails silently. It also sees the game's `goal` note and, near a `>`, a
+   `descent_check` of exact facts. It never refuses a batch, and each one is
+   recorded as a note tagged `advice`. To enable it:
    - Export `TYPESAFE_API_KEY` before `make play`.
    - Without a key, or on a timeout, HTTP error or bad answer, the line reads
      `advice: unavailable (<reason>)`.

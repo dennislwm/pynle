@@ -1,0 +1,80 @@
+{
+  "instructions": "What should the NetHack player do next? Weigh the game goal, if one is given.",
+  "hint": {
+    "instructions": "Which nav hint should the player read to choose the next move? Pick the one whose line best answers the situation.",
+    "options": {
+      "far": "per-direction open-run length without doors: cross open ground in a straight line (a run of 1 beside a wall is the wall itself)",
+      "new": "the tiles revealed since the last call: follow what just opened up, such as a door or a new room",
+      "frontier": "the nearest unexplored edge or corridor dead end: explore when there is no better lead (S14)",
+      "paths": "per-direction escape or dead-end line, doors marked +, 0 is blocked: retreat, or read a dead end before searching it (S14, S30; a run of 1 beside a wall is the wall itself)",
+      "least_explored": "quadrant coverage ranked emptiest first: choose the next room to explore (S29)"
+    }
+  },
+  "trigger": {
+    "range": 5,
+    "hp_below": 0.5,
+    "hunger_from": 2,
+    "cap_from": 1,
+    "conditions": [
+      "BL_MASK_STONE",
+      "BL_MASK_SLIME",
+      "BL_MASK_STRNGL",
+      "BL_MASK_FOODPOIS",
+      "BL_MASK_TERMILL",
+      "BL_MASK_BLIND",
+      "BL_MASK_STUN",
+      "BL_MASK_CONF",
+      "BL_MASK_HALLU"
+    ],
+    "messages": [
+      "You see here",
+      "There is",
+      "There are",
+      "Welcome to",
+      "still in a pit",
+      " - "
+    ],
+    "map_chars": [
+      ">"
+    ]
+  },
+  "descent": {
+    "hp_above": 0.7
+  },
+  "stats": {
+    "dlvl": "NLE_BL_DEPTH",
+    "xl": "NLE_BL_XP",
+    "exp": "NLE_BL_EXP",
+    "gold": "NLE_BL_GOLD",
+    "pw": "NLE_BL_ENE",
+    "pwmax": "NLE_BL_ENEMAX",
+    "ac": "NLE_BL_AC"
+  },
+  "menu": {
+    "fight": "attack: melee an adjacent hostile, or fire or throw at one in line; never melee a floating eye or gas spore, never attack a peaceful or a pet; fire or throw first at a heavy hitter not yet adjacent; mold, lichen or acid blob: route around or shoot, melee an acid blob only if it is the sole way past; kill any other hostile, XP raises HP (G3, G7, S6 to S8)",
+    "rest": "rest or search in place; only with no hostile in view, never while Hungry, Weak or Fainting, at most 10 turns per call, and below 70 percent HP on the upstairs or in a dead end (G4, G5, S30)",
+    "move": "walk, to retreat or to explore; search a dead end only after stepping onto its unrevealed neighbours, walk a branch to its end before calling it a loop, push a boulder from every angle (S14 to S16)",
+    "engrave": "engrave Elbereth to disengage when retreat will not open distance; humans (@) and minotaurs ignore it (S5)",
+    "pray": "pray to the god, a last resort that works only at very low HP (5 or less, or about 1/6 of max HP at mid levels), not at zero HP (S5)",
+    "pickup": "pick up or loot items or gold here; after a kill step on its drop and read it; open a chest where it lies and force it only if locked, take items from the list, never with A, never take a gray stone (S9, S11)",
+    "interact": "talk to a peaceful or a shopkeeper (read every price), or use a fountain, altar, sink, throne or statue (S20)",
+    "item": "use an item: apply, quaff (including a healing potion), read or zap; engrave-test an unknown wand; never dig down with a monster within 2 squares (S10, S28)",
+    "eat": "eat food from the pack; a Monk never eats corpses, except a wraith's (S9)",
+    "equip": "wear, wield or put on gear from the pack that beats what is worn (more AC, a better enchantment, an empty slot), or take off a worse piece; a Monk fights bare-handed and wears no armor or weapon by default (S12)",
+    "cast": "cast a known spell, such as sleep (Za, direction) at a dangerous adjacent or lined-up monster; needs 5 Pw; elves, vampire bats and lights resist (S26)",
+    "descend": "take the stairs down, only when every descent_check is true (HP above the limit, not hungry, no status or burden, nothing adjacent) and not fleeing; otherwise rest or heal first (S4)",
+    "other": "any other action"
+  },
+  "needs": {
+    "item": [
+      "POTION_CLASS",
+      "SCROLL_CLASS",
+      "WAND_CLASS",
+      "TOOL_CLASS",
+      "SPBOOK_CLASS"
+    ],
+    "eat": [
+      "FOOD_CLASS"
+    ]
+  }
+}

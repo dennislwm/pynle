@@ -43,6 +43,8 @@ REST_CAP = 10  # turns of rest or search per call (ADR-03 open point 1)
 ADVICE_URL = "https://api.typesafe.ai/v1/systemone"  # ADR-07 Option 2; key in env TYPESAFE_API_KEY
 ADVICE_TIMEOUT = 5  # seconds, placeholder until a real call gives latency
 ADVICE_QUESTION = "advice"
+HINT_QUESTION = "hint"
+ADVICE = json.load(open(os.path.join(os.path.dirname(__file__), "advice.json")))  # game data; API settings stay here
 DIRECTIONS = {  # (dy, dx)
     "h": (0, -1), "j": (1, 0), "k": (-1, 0), "l": (0, 1),
     "y": (-1, -1), "u": (-1, 1), "b": (1, -1), "n": (1, 1),
@@ -394,40 +396,91 @@ def nav_hints(obs, prev_obs):
 
 
 def advice_menu(obs):
-    """{option: rubric} the advisor chooses among. `item` only with a potion,
-    scroll, wand, tool or spellbook in the pack. No prayer mask: `pray` stays."""
-    menu = {
-        "melee": "attack an adjacent hostile",
-        "rest": "rest or search in place",
-        "move": "walk, to retreat or to explore",
-        "engrave": "engrave Elbereth",
-        "pray": "pray to the god",
-        "other": "any other action",
-    }
-    usable = (nethack.POTION_CLASS, nethack.SCROLL_CLASS, nethack.WAND_CLASS, nethack.TOOL_CLASS, nethack.SPBOOK_CLASS)
-    if any(int(c) in usable for c in obs.get("inv_oclasses", ())):
-        menu["item"] = "use an item: apply, quaff, read, zap, cast or throw"
-    return menu
+    """{option: rubric} the advisor chooses among, from advice.json. A gated option
+    (`needs`) appears only with one of its object classes in the pack. No prayer mask."""
+    held = {int(c) for c in obs.get("inv_oclasses", ())}
+    return {k: r for k, r in ADVICE["menu"].items()
+            if k not in ADVICE["needs"] or held & {getattr(nethack, c) for c in ADVICE["needs"][k]}}
 
 
 def _parse_answer(body):
-    answer = json.loads(body)["answers"][ADVICE_QUESTION]
-    return {"choice": answer["choice"], "dist": answer["probabilities"], "confidence": answer["confidence"]}
+    answers = json.loads(body)["answers"]
+    result = {}
+    if a := answers.get(ADVICE_QUESTION):  # asked only on a triggered turn
+        result.update(choice=a["choice"], dist=a["probabilities"], confidence=a["confidence"])
+    if h := answers.get(HINT_QUESTION):  # best-effort: a bad hint must not void the class advice
+        result["hint"] = {"choice": h.get("choice"), "dist": h.get("probabilities")}
+    return result
 
 
-def advice(obs):
-    """ADR-07 Option 2: None outside a dangerous moment (hp/hpmax under 0.5 or a
-    hostile adjacent); else {"choice", "dist", "confidence"} from one TypeSafe Jev
-    call, or {"reason": word} (no key, timeout, http, bad answer; never exception text)."""
+def _hungry(obs):
+    return int(obs["blstats"][nethack.NLE_BL_HUNGER]) >= ADVICE["trigger"]["hunger_from"]
+
+
+def _afflicted(obs):
+    """A burden or a bad status condition (the trigger's named BL_MASK_* list)."""
+    t, stat = ADVICE["trigger"], obs["blstats"]
+    mask = sum(getattr(nethack, c) for c in t["conditions"])
+    return int(stat[nethack.NLE_BL_CAP]) >= t["cap_from"] or bool(int(stat[nethack.NLE_BL_CONDITION]) & mask)
+
+
+def _stairs_seen(obs):
+    return any(c in row for row in _map_rows(obs) for c in ADVICE["trigger"]["map_chars"])
+
+
+def _descent_check(obs, near):
+    """S4's pre-descent facts, exact where the model would estimate."""
     hp, hpmax = int(obs["blstats"][nethack.NLE_BL_HP]), int(obs["blstats"][nethack.NLE_BL_HPMAX])
-    near = [d for dy, dx, d in _monsters(obs) if max(abs(dy), abs(dx)) <= 1 and _hostile(d)]
-    if not near and not (hpmax and hp / hpmax < 0.5):
-        return None
+    return {"hp_ok": bool(hpmax) and hp / hpmax > ADVICE["descent"]["hp_above"],
+            "not_hungry": not _hungry(obs), "no_status_or_burden": not _afflicted(obs),
+            "nothing_adjacent": not near}
+
+
+def _goal():
+    """The current game's `goal` note text, or None. Goal notes come from jq -nc, so
+    parse the line instead of matching a spaced string."""
+    path = game_log.current_game(PIPE_DIR)
+    if path:
+        with open(path) as f:
+            for line in f:
+                if "goal" in line and (e := json.loads(line).get("event", {})).get("tag") == "goal":
+                    return e["text"]
+
+
+def _triggered(obs, seen, stairs):
+    """Whether this turn is worth advice, per advice.json's trigger."""
+    t, stat, top = ADVICE["trigger"], obs["blstats"], game_log.screen_line(obs, 0)
+    hp, hpmax = int(stat[nethack.NLE_BL_HP]), int(stat[nethack.NLE_BL_HPMAX])
+    return (
+        stairs
+        or any(m in top for m in t["messages"])
+        or _hungry(obs)
+        or _afflicted(obs)
+        or (hpmax and hp / hpmax < t["hp_below"])
+        or any(r <= t["range"] for r in seen)
+    )
+
+
+def advice(obs, hints=None):
+    """ADR-07 Option 2: None while a prompt is pending. One TypeSafe Jev call otherwise:
+    a triggered turn (see _triggered) asks the class and the nav hint and returns {"choice",
+    "dist", "confidence", "hint"}, or {"reason": word} (no key, timeout, http, bad answer;
+    never exception text); a calm turn asks only the hint and returns {"hint"}, or None."""
+    if "--More--" in game_log.screen(obs) or "[yn" in game_log.screen_line(obs, 0):
+        return None  # a pending prompt or popup (--More-- can sit on any row): the next key answers it
+    hp, hpmax = int(obs["blstats"][nethack.NLE_BL_HP]), int(obs["blstats"][nethack.NLE_BL_HPMAX])
+    mons = [(max(abs(dy), abs(dx)), d) for dy, dx, d in _monsters(obs)]
+    near = [d for r, d in mons if r <= 1 and _hostile(d)]
+    stairs = _stairs_seen(obs)
+    triggered = _triggered(obs, [r for r, d in mons if not d.startswith("tame ")], stairs)
+    fail = lambda word: {"reason": word} if triggered else None  # noqa: E731 -- a calm turn fails silently
     key = os.environ.get("TYPESAFE_API_KEY")
     if not key:
-        return {"reason": "no key"}
+        return fail("no key")
     menu = advice_menu(obs)
     state = {
+        "character": CHARACTER,
+        "stats": {k: int(obs["blstats"][getattr(nethack, c)]) for k, c in ADVICE["stats"].items()},
         "screen": game_log.screen(obs),
         "inventory": [bytes(r).split(b"\0")[0].decode("ascii", "replace") for r in obs.get("inv_strs", ()) if r[0]],
         "hp": hp,
@@ -435,9 +488,14 @@ def advice(obs):
         "adjacent_hostiles": len(near),
         "adjacent_hostile_descriptions": near,
         "menu": list(menu),
+        **({"nav_hints": hints} if hints else {}),
+        **({"goal": g} if (g := _goal()) else {}),
+        **({"descent_check": _descent_check(obs, near)} if stairs else {}),
     }
-    question = {"type": "choice", "instructions": "What should the NetHack player do next?", "criteria": menu}
-    body = {"state": state, "model": "jev-latest", "questions": {ADVICE_QUESTION: question}}
+    question = {"type": "choice", "instructions": ADVICE["instructions"], "criteria": menu}
+    hint = {"type": "choice", "instructions": ADVICE["hint"]["instructions"], "criteria": ADVICE["hint"]["options"]}
+    body = {"state": state, "model": "jev-latest",
+            "questions": {HINT_QUESTION: hint, **({ADVICE_QUESTION: question} if triggered else {})}}
     req = urllib.request.Request(
         ADVICE_URL,
         json.dumps(body).encode(),
@@ -445,13 +503,16 @@ def advice(obs):
     )
     try:
         with urllib.request.urlopen(req, timeout=ADVICE_TIMEOUT) as resp:
-            return _parse_answer(resp.read())
+            result = _parse_answer(resp.read())
+            if triggered and "choice" not in result:
+                raise KeyError(ADVICE_QUESTION)
+            return result
     except TimeoutError:
-        return {"reason": "timeout"}
+        return fail("timeout")
     except urllib.error.URLError:
-        return {"reason": "http"}
+        return fail("http")
     except (json.JSONDecodeError, KeyError):
-        return {"reason": "bad answer"}
+        return fail("bad answer")
 
 
 def print_screen(daemon, prev_obs=None):
@@ -464,21 +525,34 @@ def print_screen(daemon, prev_obs=None):
     hints = nav_hints(obs, prev_obs)
     for line in hints:
         print(line)
-    result = None if daemon.done else advice(obs)
+    result = None if daemon.done else advice(obs, hints)
     if result:
         if "reason" in result:
             line = f"advice: unavailable ({result['reason']})"
         else:
-            ranked = sorted(result["dist"].items(), key=lambda kv: -kv[1])
-            line = "advice: " + " ".join(f"{k} {v:.2f}" for k, v in ranked) + f" (confidence {result['confidence']:.2f})"
-        print(line)
-        hints = hints + [line]
-        fields = {k: v for k, v in result.items() if k != "choice"}
-        game_log.note(
-            daemon, line, tag="advice", t=int(obs["blstats"][nethack.NLE_BL_TIME]),
-            hp=int(obs["blstats"][nethack.NLE_BL_HP]), hpmax=int(obs["blstats"][nethack.NLE_BL_HPMAX]),
-            menu=list(advice_menu(obs)), **fields,
-        )
+            use = ""
+            if (h := result.get("hint")) and h["dist"]:
+                top = sorted(h["dist"].items(), key=lambda kv: -kv[1])[:2]
+                use = "use " + " ".join(f"{k} {v:.2f}" for k, v in top)
+            if "choice" in result:
+                ranked = sorted(result["dist"].items(), key=lambda kv: -kv[1])
+                line = "advice: " + " ".join(f"{k} {v:.2f}" for k, v in ranked) + f" (confidence {result['confidence']:.2f})"
+                if result["choice"] == "move" and use:
+                    line += " | " + use
+            elif use:
+                line = "hint: " + use  # a calm turn: the hint alone
+            else:
+                line = ""
+        if line:
+            print(line)
+            hints = hints + [line]
+        if "choice" in result or "reason" in result:  # a calm hint writes no note
+            fields = {k: v for k, v in result.items() if k != "choice"}
+            game_log.note(
+                daemon, line, tag="advice", t=int(obs["blstats"][nethack.NLE_BL_TIME]),
+                hp=int(obs["blstats"][nethack.NLE_BL_HP]), hpmax=int(obs["blstats"][nethack.NLE_BL_HPMAX]),
+                menu=list(advice_menu(obs)), **fields,
+            )
     game_log.write_view(obs, VIEW_PATH, hints)
 
 
