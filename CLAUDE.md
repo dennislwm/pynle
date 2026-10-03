@@ -22,6 +22,7 @@ On every call:
 1. Read the top line and the last status line before sending keys: `--More--`, `[yn]`, Hungry, Weak, Fainting, low HP.
 2. Send one key per call while a peaceful (guard, shopkeeper, watchman) is within 2 squares, and never batch keys near a prompt: `y` and `n` are answers as well as moves.
 3. A batch that stops early is already logged as a `violation` note. Treat it as a mistake to learn from. After an HP-loss stop, read the top line and name the cause before the next key; do not write it off as "probably a trap".
+4. An `advice:` line (odds for what to do next, with a confidence) or a `hint:` line (which nav hint to read) may follow the nav hints. Confidence is how concentrated the odds are, not a promise of being right: a close split between the top two is a weak lean. A `REFUSED` gate and the gate table win. How they work: [Recording a claude-play game](README.md#recording-a-claude-play-game).
 
 Constraints:
 
