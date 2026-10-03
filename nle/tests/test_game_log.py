@@ -3,6 +3,7 @@ import json
 import os
 import shutil
 import tempfile
+import urllib.error
 
 import numpy as np
 import pytest
@@ -615,6 +616,133 @@ class TestNavHints:
         for prefix in ("far: ", "new: ", "frontier: ", "paths: ", "least_explored: "):
             assert prefix in out
             assert prefix in page  # REQ-020: the live analyst view carries them too
+
+
+class TestAdvice:
+    """REQ-022 / ADR-07 Option 2: the TypeSafe advisor. urlopen is stubbed; no test
+    reaches the network and no real key exists here."""
+
+    KEY = "sk-test-SECRET"
+
+    @pytest.fixture
+    def api(self, monkeypatch, tmp_path):
+        monkeypatch.setenv("TYPESAFE_API_KEY", self.KEY)
+        monkeypatch.setattr(claude_play, "VIEW_PATH", str(tmp_path / "v.html"))
+        calls = []
+
+        class Resp:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                return False
+
+            def read(self):
+                return json.dumps({"questions": {"advice": {
+                    "choice": "rest", "probabilities": {"rest": 0.7, "melee": 0.3}, "confidence": 0.8}}}).encode()
+
+        def fake_urlopen(req, timeout=None):
+            calls.append((req, timeout))
+            return Resp()
+
+        monkeypatch.setattr(claude_play.urllib.request, "urlopen", fake_urlopen)
+        return calls
+
+    def danger(self, hp=13):
+        obs = gate_obs({(5, 6): "jackal"})
+        obs["blstats"][nethack.NLE_BL_HP] = hp
+        return obs
+
+    def play(self, tmp_path, obs=None):
+        """A FakeDaemon in a real (tmp) game file, so notes land in tmp_path."""
+        d = FakeDaemon(str(tmp_path))
+        game_log.reset_game(d, None, str(tmp_path))
+        d.obs = obs if obs is not None else make_obs()
+        return d
+
+    def advice_notes(self, tmp_path):
+        events = [e["event"] for e in lines(game_log.current_game(str(tmp_path))) if "event" in e]
+        return [e for e in events if e.get("tag") == "advice"]
+
+    def test_no_call_on_a_safe_full_hp_obs(self, api, tmp_path, capsys):
+        claude_play.print_screen(self.play(tmp_path))
+        assert api == [] and "advice" not in capsys.readouterr().out
+        assert self.advice_notes(tmp_path) == []
+
+    def test_skipped_when_the_game_is_done(self, api, tmp_path):
+        d = self.play(tmp_path, self.danger())
+        d.done = True
+        claude_play.print_screen(d)
+        assert api == []
+
+    def test_low_hp_alone_triggers(self, api):
+        obs = make_obs(hp=5)
+        assert claude_play.advice(obs)["choice"] == "rest"
+        assert len(api) == 1
+
+    def test_request_shape(self, api):
+        obs = self.danger()
+        obs["inv_strs"] = np.zeros((2, 80), dtype=np.uint8)
+        obs["inv_strs"][0, :6] = list(b"a dart")
+        claude_play.advice(obs)
+        (req, timeout), = api
+        body = json.loads(req.data)
+        q = body["questions"]["advice"]
+        assert req.full_url == "https://api.typesafe.ai/v1/systemone"
+        assert req.get_header("Authorization") == "Bearer " + self.KEY
+        assert timeout == claude_play.ADVICE_TIMEOUT == 5
+        assert body["model"] == "jev-latest" and q["type"] == "choice"
+        assert set(q["criteria"]) == {"melee", "rest", "move", "engrave", "pray", "other"}
+        s = body["state"]
+        assert (s["hp"], s["hpmax"], s["adjacent_hostiles"]) == (13, 13, 1)
+        assert s["adjacent_hostile_descriptions"] == ["jackal"]
+        assert s["inventory"] == ["a dart"] and "screen" in s and "menu" in s
+
+    def test_item_only_with_a_usable_item(self):
+        obs = make_obs()
+        assert "item" not in claude_play.advice_menu(obs)
+        obs["inv_oclasses"] = np.array([nethack.WEAPON_CLASS, nethack.MAXOCLASSES])
+        assert "item" not in claude_play.advice_menu(obs)
+        obs["inv_oclasses"] = np.array([nethack.WEAPON_CLASS, nethack.POTION_CLASS])
+        assert "item" in claude_play.advice_menu(obs)
+
+    def test_the_advice_note_and_line(self, api, tmp_path, capsys):
+        d = self.play(tmp_path, self.danger(hp=5))
+        claude_play.print_screen(d)
+        out = capsys.readouterr().out
+        assert "advice: rest 0.70 melee 0.30 (confidence 0.80)" in out
+        assert "advice: rest" in open(tmp_path / "v.html").read()
+        n, = self.advice_notes(tmp_path)
+        assert (n["t"], n["hp"], n["hpmax"], n["dist"], n["confidence"]) == (1, 5, 13, {"rest": 0.7, "melee": 0.3}, 0.8)
+        assert n["menu"] == list(claude_play.advice_menu(d.obs))
+
+    def test_no_key(self, api, tmp_path, monkeypatch, capsys):
+        monkeypatch.delenv("TYPESAFE_API_KEY")
+        d = self.play(tmp_path, self.danger())
+        claude_play.print_screen(d)
+        assert "advice: unavailable (no key)" in capsys.readouterr().out
+        assert api == []
+
+    @pytest.mark.parametrize("exc, word", [
+        (urllib.error.URLError("boom SECRET"), "http"),
+        (urllib.error.HTTPError("u", 401, "bad SECRET", {}, None), "http"),
+        (TimeoutError("slow SECRET"), "timeout"),
+        (json.JSONDecodeError("SECRET", "x", 0), "bad answer"),
+        (KeyError("SECRET"), "bad answer"),
+    ])
+    def test_failures_leak_nothing(self, api, tmp_path, monkeypatch, capsys, exc, word):
+        def boom(req, timeout=None):
+            raise exc
+
+        monkeypatch.setattr(claude_play.urllib.request, "urlopen", boom)
+        d = self.play(tmp_path, self.danger())
+        claude_play.print_screen(d)
+        out = capsys.readouterr().out
+        assert f"advice: unavailable ({word})" in out
+        n, = self.advice_notes(tmp_path)
+        assert n["reason"] == word and "dist" not in n
+        for text in (out, open(tmp_path / "v.html").read(), json.dumps(n)):
+            assert "SECRET" not in text
 
 
 class TestRealDaemon:

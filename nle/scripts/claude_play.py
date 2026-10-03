@@ -23,8 +23,11 @@ G8 only to a batch of moves, F, s, . and digits, so a cast, throw or quaff is fi
 A violation note is written for --stop discard on a running game (G11) and for a fresh game
 opened after a game that never ended in death (G12).
 """
+import json
 import os
 import sys
+import urllib.error
+import urllib.request
 
 import numpy as np
 
@@ -37,6 +40,9 @@ VIEW_PATH = os.path.join(game_log.STATE_DIR, "game_view.html")
 CHARACTER = "mon-hum-neu-mal"
 HUNGER = ("Hungry", "Weak", "Fainting")
 REST_CAP = 10  # turns of rest or search per call (ADR-03 open point 1)
+ADVICE_URL = "https://api.typesafe.ai/v1/systemone"  # ADR-07 Option 2; key in env TYPESAFE_API_KEY
+ADVICE_TIMEOUT = 5  # seconds, placeholder until a real call gives latency
+ADVICE_QUESTION = "advice"
 DIRECTIONS = {  # (dy, dx)
     "h": (0, -1), "j": (1, 0), "k": (-1, 0), "l": (0, 1),
     "y": (-1, -1), "u": (-1, 1), "b": (1, -1), "n": (1, 1),
@@ -387,6 +393,70 @@ def nav_hints(obs, prev_obs):
     ]
 
 
+def advice_menu(obs):
+    """{option: rubric} the advisor chooses among. `item` only with a potion,
+    scroll, wand, tool or spellbook in the pack. No prayer mask: `pray` stays."""
+    menu = {
+        "melee": "attack an adjacent hostile",
+        "rest": "rest or search in place",
+        "move": "walk, to retreat or to explore",
+        "engrave": "engrave Elbereth",
+        "pray": "pray to the god",
+        "other": "any other action",
+    }
+    usable = (nethack.POTION_CLASS, nethack.SCROLL_CLASS, nethack.WAND_CLASS, nethack.TOOL_CLASS, nethack.SPBOOK_CLASS)
+    if any(int(c) in usable for c in obs.get("inv_oclasses", ())):
+        menu["item"] = "use an item: apply, quaff, read, zap, cast or throw"
+    return menu
+
+
+def _parse_answer(body):
+    # ponytail: the wrapper around question answers is undocumented (docs show only the
+    # answer itself); {"questions": {id: answer}} is assumed. A human runs one real call
+    # to confirm it. A wrong guess is a KeyError, reported as `bad answer`.
+    answer = json.loads(body)["questions"][ADVICE_QUESTION]
+    return {"choice": answer["choice"], "dist": answer["probabilities"], "confidence": answer["confidence"]}
+
+
+def advice(obs):
+    """ADR-07 Option 2: None outside a dangerous moment (hp/hpmax under 0.5 or a
+    hostile adjacent); else {"choice", "dist", "confidence"} from one TypeSafe Jev
+    call, or {"reason": word} (no key, timeout, http, bad answer; never exception text)."""
+    hp, hpmax = int(obs["blstats"][nethack.NLE_BL_HP]), int(obs["blstats"][nethack.NLE_BL_HPMAX])
+    near = [d for dy, dx, d in _monsters(obs) if max(abs(dy), abs(dx)) <= 1 and _hostile(d)]
+    if not near and not (hpmax and hp / hpmax < 0.5):
+        return None
+    key = os.environ.get("TYPESAFE_API_KEY")
+    if not key:
+        return {"reason": "no key"}
+    menu = advice_menu(obs)
+    state = {
+        "screen": game_log.screen(obs),
+        "inventory": [bytes(r).split(b"\0")[0].decode("ascii", "replace") for r in obs.get("inv_strs", ()) if r[0]],
+        "hp": hp,
+        "hpmax": hpmax,
+        "adjacent_hostiles": len(near),
+        "adjacent_hostile_descriptions": near,
+        "menu": list(menu),
+    }
+    question = {"type": "choice", "instructions": "What should the NetHack player do next?", "criteria": menu}
+    body = {"state": state, "model": "jev-latest", "questions": {ADVICE_QUESTION: question}}
+    req = urllib.request.Request(
+        ADVICE_URL,
+        json.dumps(body).encode(),
+        {"Authorization": "Bearer " + key, "Content-Type": "application/json"},
+    )
+    try:
+        with urllib.request.urlopen(req, timeout=ADVICE_TIMEOUT) as resp:
+            return _parse_answer(resp.read())
+    except TimeoutError:
+        return {"reason": "timeout"}
+    except urllib.error.URLError:
+        return {"reason": "http"}
+    except (json.JSONDecodeError, KeyError):
+        return {"reason": "bad answer"}
+
+
 def print_screen(daemon, prev_obs=None):
     obs = daemon.obs
     cursor = tuple(int(x) for x in obs["tty_cursor"])
@@ -397,6 +467,21 @@ def print_screen(daemon, prev_obs=None):
     hints = nav_hints(obs, prev_obs)
     for line in hints:
         print(line)
+    result = None if daemon.done else advice(obs)
+    if result:
+        if "reason" in result:
+            line = f"advice: unavailable ({result['reason']})"
+        else:
+            ranked = sorted(result["dist"].items(), key=lambda kv: -kv[1])
+            line = "advice: " + " ".join(f"{k} {v:.2f}" for k, v in ranked) + f" (confidence {result['confidence']:.2f})"
+        print(line)
+        hints = hints + [line]
+        fields = {k: v for k, v in result.items() if k != "choice"}
+        game_log.note(
+            daemon, line, tag="advice", t=int(obs["blstats"][nethack.NLE_BL_TIME]),
+            hp=int(obs["blstats"][nethack.NLE_BL_HP]), hpmax=int(obs["blstats"][nethack.NLE_BL_HPMAX]),
+            menu=list(advice_menu(obs)), **fields,
+        )
     game_log.write_view(obs, VIEW_PATH, hints)
 
 

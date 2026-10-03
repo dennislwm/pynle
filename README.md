@@ -244,6 +244,17 @@ per line:
 
    `least_explored:` and `paths:` each pair with a required action: see the
    code repo `CLAUDE.md` gate table (S29, S30).
+
+   A sixth line, `advice:`, appears only in a dangerous moment: HP under half,
+   or a hostile adjacent (ADR-07, Option 2). It is a TypeSafe Jev choice over
+   `melee`, `rest`, `move`, `engrave`, `pray`, `other` and `item` (only with a
+   usable item), with probabilities and a confidence. It never refuses a
+   batch, and each one is recorded as a note tagged `advice`. To enable it:
+   - Export `TYPESAFE_API_KEY` before `make play`.
+   - Without a key, or on a timeout, HTTP error or bad answer, the line reads
+     `advice: unavailable (<reason>)`.
+   - Run one real call and read the line to confirm the key and the endpoint:
+     the tests stub the network, so they do not prove a real call works.
 4. `make play ARGS='--stop'` saves and stops. `--start` then `--reset`
    resumes into the same file. `--stop discard` ends the game without a save,
    and the next `--reset` opens a new file. A finished game, or one never
